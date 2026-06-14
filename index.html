@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#44403c" />
+<title>Upper Footworks — Ledger</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  body { -webkit-tap-highlight-color: transparent; }
+  ::-webkit-scrollbar { height: 6px; width: 6px; }
+  ::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+/* ============================================================
+   SUPABASE CONFIG
+   ============================================================ */
+const SUPABASE_URL = "https://rxnccrgnrveodwessjzd.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4bmNjcmducnZlb2R3ZXNzanpkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MjUxNzksImV4cCI6MjA5NzAwMTE3OX0.DKp76Gc7yZcnj-8__0hMF2UwHmqC5gjp0BOmQuQe3JY";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ============================================================
+   ICONS (lightweight inline emoji to avoid external deps)
+   ============================================================ */
+const Icon = ({ children, className = "" }) => (
+  <span className={`inline-block leading-none ${className}`} style={{fontSize: "1em"}}>{children}</span>
+);
+const I = {
+  dashboard: "📊", raw: "📦", products: "🔨", production: "📋", purchases: "🛒",
+  sales: "📈", labor: "👥", clients: "🤝", expenses: "💰", reports: "📑",
+  settings: "⚙️", plus: "➕", trash: "🗑️", save: "💾", warn: "⚠️",
+  down: "▾", right: "▸"
+};
+
+/* ============================================================
+   UTILITIES
+   ============================================================ */
+const uid = () => Math.random().toString(36).slice(2, 10);
+const today = () => new Date().toISOString().slice(0, 10);
+
+// Debounce: delays calling fn until `wait` ms after last call with same key
+const _debounceTimers = {};
+function debounce(key, fn, wait = 600) {
+  if (_debounceTimers[key]) clearTimeout(_debounceTimers[key]);
+  _debounceTimers[key] = setTimeout(fn, wait);
+}
+const fmtMoney = (n) => "₹" + (Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+const fmtNum = (n, d = 2) => {
+  const v = Number(n) || 0;
+  return v % 1 === 0 ? v.toString() : v.toFixed(d);
+};
+function daysAgo(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return Math.round((now - d) / (1000 * 60 * 60 * 24));
+}
+const RANGES = {
+  daily: { label: "Today", days: 0 },
+  weekly: { label: "This Week (7d)", days: 6 },
+  fortnightly: { label: "Fortnight (15d)", days: 14 },
+  monthly: { label: "This Month (30d)", days: 29 },
+};
+function inRange(dateStr, rangeKey) {
+  const da = daysAgo(dateStr);
+  return da >= 0 && da <= RANGES[rangeKey].days;
+}
+
+/* ============================================================
+   CONSTANTS
+   ============================================================ */
+const ROLES = ["Cutting", "Stitching", "Assembly", "Finishing", "Quality Check", "Packing", "Helper"];
+
+/* ============================================================
+   DERIVED CALCULATIONS
+   ============================================================ */
+function productMaterialCost(product, rawMaterials) {
+  return (product.bom || []).reduce((sum, b) => {
+    const r = rawMaterials.find((x) => x.id === b.materialId);
+    return sum + (r ? r.costPerUnit * b.qty : 0);
+  }, 0);
+}
+function productFullCost(product, rawMaterials) {
+  return productMaterialCost(product, rawMaterials) + (Number(product.laborCost) || 0);
+}
+function inventoryValue(data) {
+  const rawVal = data.rawMaterials.reduce((s, r) => s + r.stock * r.costPerUnit, 0);
+  const finVal = data.products.reduce((s, p) => s + p.stock * productFullCost(p, data.rawMaterials), 0);
+  return { rawVal, finVal, total: rawVal + finVal };
+}
+function periodMetrics(data, rangeKey) {
+  const sales = data.sales.filter((s) => inRange(s.date, rangeKey));
+  const production = data.production.filter((p) => inRange(p.date, rangeKey));
+  const purchases = data.purchases.filter((p) => inRange(p.date, rangeKey));
+  const expenses = data.expenses.filter((e) => inRange(e.date, rangeKey));
+  const attendance = data.attendance.filter((a) => inRange(a.date, rangeKey));
+
+  const revenue = sales.reduce((s, x) => s + x.qty * x.rate, 0);
+  const cogs = sales.reduce((s, x) => {
+    const prod = data.products.find((p) => p.id === x.productId);
+    const cost = prod ? productFullCost(prod, data.rawMaterials) : 0;
+    return s + cost * x.qty;
+  }, 0);
+  const grossProfit = revenue - cogs;
+  const wageExpense = attendance.reduce((s, a) => s + (Number(a.wageCost) || 0), 0);
+  const otherExpenses = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const totalExpenses = otherExpenses + wageExpense;
+  const netProfit = grossProfit - otherExpenses;
+
+  const unitsProduced = production.reduce((s, p) => s + Number(p.qty || 0), 0);
+  const unitsSold = sales.reduce((s, x) => s + Number(x.qty || 0), 0);
+  const purchaseSpend = purchases.reduce((s, x) => s + x.qty * x.rate, 0);
+  const presentLaborDays = attendance.filter((a) => a.worked).length;
+  const productivity = presentLaborDays > 0 ? unitsProduced / presentLaborDays : 0;
+
+  const invVal = inventoryValue(data);
+  const avgInventory = invVal.total;
+  const inventoryTurnover = avgInventory > 0 ? cogs / avgInventory : 0;
+  const roi = data.settings.investment > 0 ? (netProfit / data.settings.investment) * 100 : 0;
+  const avgSaleValue = sales.length > 0 ? revenue / sales.length : 0;
+
+  return {
+    revenue, cogs, grossProfit, otherExpenses, wageExpense, totalExpenses, netProfit,
+    unitsProduced, unitsSold, purchaseSpend, presentLaborDays, productivity,
+    inventoryTurnover, roi, avgSaleValue, salesCount: sales.length, invVal,
+  };
+}
+
+/* ============================================================
+   SUPABASE <-> APP DATA MAPPING
+   ============================================================ */
+async function loadAllData() {
+  const [rawMaterials, products, bom, labor, clients, purchases, production, sales, attendance, expenses, settingsRows] = await Promise.all([
+    sb.from("raw_materials").select("*").order("created_at"),
+    sb.from("products").select("*").order("created_at"),
+    sb.from("product_bom").select("*"),
+    sb.from("labor").select("*").order("created_at"),
+    sb.from("clients").select("*").order("created_at"),
+    sb.from("purchases").select("*").order("date", { ascending: false }),
+    sb.from("production").select("*").order("date", { ascending: false }),
+    sb.from("sales").select("*").order("date", { ascending: false }),
+    sb.from("attendance").select("*").order("date", { ascending: false }),
+    sb.from("expenses").select("*").order("date", { ascending: false }),
+    sb.from("settings").select("*").eq("id", 1).single(),
+  ]);
+
+  const errors = [rawMaterials, products, bom, labor, clients, purchases, production, sales, attendance, expenses, settingsRows]
+    .map((r) => r.error).filter(Boolean);
+  if (errors.length) throw errors[0];
+
+  const bomByProduct = {};
+  (bom.data || []).forEach((b) => {
+    if (!bomByProduct[b.product_id]) bomByProduct[b.product_id] = [];
+    bomByProduct[b.product_id].push({ materialId: b.material_id, qty: Number(b.qty), bomRowId: b.id });
+  });
+
+  return {
+    rawMaterials: (rawMaterials.data || []).map((r) => ({
+      id: r.id, name: r.name, unit: r.unit, stock: Number(r.stock), costPerUnit: Number(r.cost_per_unit), minStock: Number(r.min_stock),
+    })),
+    products: (products.data || []).map((p) => ({
+      id: p.id, name: p.name, sellingPrice: Number(p.selling_price), laborCost: Number(p.labor_cost), stock: Number(p.stock),
+      bom: bomByProduct[p.id] || [],
+    })),
+    labor: (labor.data || []).map((l) => ({
+      id: l.id, name: l.name, role: l.role, wageType: l.wage_type, dailyWage: Number(l.daily_wage), pieceRate: Number(l.piece_rate),
+    })),
+    clients: (clients.data || []).map((c) => ({ id: c.id, name: c.name, contact: c.contact || "" })),
+    purchases: (purchases.data || []).map((p) => ({ id: p.id, date: p.date, materialId: p.material_id, qty: Number(p.qty), rate: Number(p.rate) })),
+    production: (production.data || []).map((p) => ({ id: p.id, date: p.date, productId: p.product_id, qty: Number(p.qty), stage: p.stage, notes: p.notes || "", cost: Number(p.cost) })),
+    sales: (sales.data || []).map((s) => ({ id: s.id, date: s.date, clientId: s.client_id, productId: s.product_id, qty: Number(s.qty), rate: Number(s.rate) })),
+    attendance: (attendance.data || []).map((a) => ({ id: a.id, date: a.date, laborId: a.labor_id, worked: a.worked, units: Number(a.units), wageCost: Number(a.wage_cost) })),
+    expenses: (expenses.data || []).map((e) => ({ id: e.id, date: e.date, category: e.category, amount: Number(e.amount), note: e.note || "" })),
+    settings: settingsRows.data
+      ? { investment: Number(settingsRows.data.investment), unitName: settingsRows.data.unit_name }
+      : { investment: 1000000, unitName: "Upper Footworks" },
+  };
+}
+
+/* ============================================================
+   DATA HOOK (Supabase-backed, shared across devices)
+   ============================================================ */
+function useERPData() {
+  const [data, setDataRaw] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const refresh = async () => {
+    try {
+      const fresh = await loadAllData();
+      setDataRaw(fresh);
+      setError(null);
+    } catch (e) {
+      setError(e.message || String(e));
+    }
+    setLoaded(true);
+  };
+
+  useEffect(() => { refresh(); }, []);
+
+  // setData is kept for local optimistic UI updates only;
+  // real persistence happens via the mutation helpers below.
+  const setData = (updater) => {
+    setDataRaw((prev) => (typeof updater === "function" ? updater(prev) : updater));
+  };
+
+  return [data, setData, loaded, error, refresh, syncing, setSyncing];
+}
+
+/* ============================================================
+   MUTATION HELPERS — each writes to Supabase, then refresh() is called
+   ============================================================ */
+const db = {
+  // Raw materials
+  async upsertMaterial(m) {
+    await sb.from("raw_materials").upsert({ id: m.id, name: m.name, unit: m.unit, stock: m.stock, cost_per_unit: m.costPerUnit, min_stock: m.minStock });
+  },
+  async insertMaterial() {
+    const { data } = await sb.from("raw_materials").insert({ name: "New Material", unit: "unit", stock: 0, cost_per_unit: 0, min_stock: 0 }).select().single();
+    return data;
+  },
+  async deleteMaterial(id) { await sb.from("raw_materials").delete().eq("id", id); },
+
+  // Products + BOM
+  async upsertProduct(p) {
+    await sb.from("products").upsert({ id: p.id, name: p.name, selling_price: p.sellingPrice, labor_cost: p.laborCost, stock: p.stock });
+  },
+  async insertProduct() {
+    const { data } = await sb.from("products").insert({ name: "New Design", selling_price: 0, labor_cost: 0, stock: 0 }).select().single();
+    return data;
+  },
+  async deleteProduct(id) { await sb.from("products").delete().eq("id", id); },
+  async upsertBom(productId, materialId, qty) {
+    const { data: existing } = await sb.from("product_bom").select("id").eq("product_id", productId).eq("material_id", materialId).maybeSingle();
+    if (qty <= 0) {
+      if (existing) await sb.from("product_bom").delete().eq("id", existing.id);
+      return;
+    }
+    if (existing) await sb.from("product_bom").update({ qty }).eq("id", existing.id);
+    else await sb.from("product_bom").insert({ product_id: productId, material_id: materialId, qty });
+  },
+
+  // Labor
+  async upsertLabor(l) {
+    await sb.from("labor").upsert({ id: l.id, name: l.name, role: l.role, wage_type: l.wageType, daily_wage: l.dailyWage, piece_rate: l.pieceRate });
+  },
+  async insertLabor() {
+    const { data } = await sb.from("labor").insert({ name: "New Worker", role: "Helper", wage_type: "daily", daily_wage: 450, piece_rate: 30 }).select().single();
+    return data;
+  },
+  async deleteLabor(id) { await sb.from("labor").delete().eq("id", id); },
+
+  // Clients
+  async upsertClient(c) { await sb.from("clients").upsert({ id: c.id, name: c.name, contact: c.contact }); },
+  async insertClient() {
+    const { data } = await sb.from("clients").insert({ name: "New Client", contact: "" }).select().single();
+    return data;
+  },
+  async deleteClient(id) { await sb.from("clients").delete().eq("id", id); },
+
+  // Purchases
+  async insertPurchase(p) { await sb.from("purchases").insert({ date: p.date, material_id: p.materialId, qty: p.qty, rate: p.rate }); },
+  async deletePurchase(id) { await sb.from("purchases").delete().eq("id", id); },
+
+  // Production
+  async insertProduction(p) { await sb.from("production").insert({ date: p.date, product_id: p.productId, qty: p.qty, stage: p.stage, notes: p.notes, cost: p.cost }); },
+  async deleteProduction(id) { await sb.from("production").delete().eq("id", id); },
+
+  // Sales
+  async insertSale(s) { await sb.from("sales").insert({ date: s.date, client_id: s.clientId, product_id: s.productId, qty: s.qty, rate: s.rate }); },
+  async deleteSale(id) { await sb.from("sales").delete().eq("id", id); },
+
+  // Attendance
+  async replaceAttendanceForDate(date, rows) {
+    await sb.from("attendance").delete().eq("date", date);
+    if (rows.length) await sb.from("attendance").insert(rows.map((r) => ({ date, labor_id: r.laborId, worked: r.worked, units: r.units, wage_cost: r.wageCost })));
+  },
+  async deleteAttendanceDate(date) { await sb.from("attendance").delete().eq("date", date); },
+
+  // Expenses
+  async insertExpense(e) { await sb.from("expenses").insert({ date: e.date, category: e.category, amount: e.amount, note: e.note }); },
+  async deleteExpense(id) { await sb.from("expenses").delete().eq("id", id); },
+
+  // Settings
+  async updateSettings(s) { await sb.from("settings").update({ unit_name: s.unitName, investment: s.investment }).eq("id", 1); },
+
+  // Stock adjustments (raw material consumption / finished goods)
+  async adjustMaterialStock(id, delta) {
+    const { data: row } = await sb.from("raw_materials").select("stock").eq("id", id).single();
+    const newStock = Math.max(0, Number(row.stock) + delta);
+    await sb.from("raw_materials").update({ stock: newStock }).eq("id", id);
+  },
+  async adjustProductStock(id, delta) {
+    const { data: row } = await sb.from("products").select("stock").eq("id", id).single();
+    const newStock = Math.max(0, Number(row.stock) + delta);
+    await sb.from("products").update({ stock: newStock }).eq("id", id);
+  },
+};
+
+/* ============================================================
+   SHARED UI BITS
+   ============================================================ */
+function Tag({ children, tone = "default" }) {
+  const tones = {
+    default: "bg-stone-100 text-stone-700 border-stone-300",
+    good: "bg-emerald-50 text-emerald-700 border-emerald-300",
+    bad: "bg-rose-50 text-rose-700 border-rose-300",
+    warn: "bg-amber-50 text-amber-700 border-amber-300",
+  };
+  return <span className={`px-2 py-0.5 rounded-full text-xs border font-medium ${tones[tone]}`}>{children}</span>;
+}
+function Card({ title, value, sub, tone = "default" }) {
+  const tones = { default: "border-stone-200", good: "border-emerald-200 bg-emerald-50/40", bad: "border-rose-200 bg-rose-50/40" };
+  return (
+    <div className={`rounded-xl border p-4 bg-white ${tones[tone]}`}>
+      <div className="text-xs uppercase tracking-wide text-stone-500 font-semibold">{title}</div>
+      <div className="text-2xl font-bold text-stone-800 mt-1 font-mono">{value}</div>
+      {sub && <div className="text-xs text-stone-400 mt-1">{sub}</div>}
+    </div>
+  );
+}
+function SectionHeader({ icon, title, action }) {
+  return (
+    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div className="flex items-center gap-2 text-stone-800">
+        <Icon className="text-amber-700 text-lg">{icon}</Icon>
+        <h2 className="font-bold text-lg" style={{ fontFamily: "Georgia, serif" }}>{title}</h2>
+      </div>
+      {action}
+    </div>
+  );
+}
+function Th({ children, className = "", ...rest }) { return <th {...rest} className={`text-left text-xs uppercase tracking-wide text-stone-500 font-semibold px-3 py-2 ${className}`}>{children}</th>; }
+function Td({ children, className = "", ...rest }) { return <td {...rest} className={`px-3 py-2 text-sm text-stone-700 ${className}`}>{children}</td>; }
+function Input(props) { return <input {...props} className={`border border-stone-300 rounded-lg px-2 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-amber-400 ${props.className || ""}`} />; }
+function Select(props) { return <select {...props} className={`border border-stone-300 rounded-lg px-2 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-amber-400 ${props.className || ""}`} />; }
+function Btn({ children, onClick, variant = "primary", className = "" }) {
+  const variants = { primary: "bg-amber-700 text-white hover:bg-amber-800", ghost: "bg-stone-100 text-stone-700 hover:bg-stone-200", danger: "bg-rose-50 text-rose-600 hover:bg-rose-100" };
+  return <button onClick={onClick} className={`px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition ${variants[variant]} ${className}`}>{children}</button>;
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+function Dashboard({ data }) {
+  const m = periodMetrics(data, "monthly");
+  const today30 = periodMetrics(data, "daily");
+  const lowStock = data.rawMaterials.filter((r) => r.stock <= r.minStock);
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader icon={I.dashboard} title={`${data.settings.unitName} — Overview`} />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card title="Today's Sales" value={fmtMoney(today30.revenue)} sub={`${today30.salesCount} order(s)`} />
+        <Card title="Month Revenue" value={fmtMoney(m.revenue)} sub="last 30 days" />
+        <Card title="Month Net Profit" value={fmtMoney(m.netProfit)} tone={m.netProfit >= 0 ? "good" : "bad"} sub={`Margin ${m.revenue ? fmtNum((m.netProfit / m.revenue) * 100, 1) : 0}%`} />
+        <Card title="Month ROI" value={fmtNum(m.roi, 2) + "%"} sub="on configured investment" />
+        <Card title="Inventory Value" value={fmtMoney(m.invVal.total)} sub={`Raw ${fmtMoney(m.invVal.rawVal)} · Finished ${fmtMoney(m.invVal.finVal)}`} />
+        <Card title="Units Produced (30d)" value={fmtNum(m.unitsProduced, 0)} sub={`Sold ${fmtNum(m.unitsSold, 0)}`} />
+        <Card title="Productivity" value={fmtNum(m.productivity, 2)} sub="units per labor-day" />
+        <Card title="Inventory Turnover" value={fmtNum(m.inventoryTurnover, 2) + "x"} sub="COGS / inventory value (30d)" />
+      </div>
+
+      {lowStock.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 flex items-start gap-2">
+          <Icon className="text-amber-600 mt-0.5 shrink-0">{I.warn}</Icon>
+          <div className="text-sm text-amber-800">
+            <span className="font-semibold">Low raw material stock: </span>
+            {lowStock.map((r) => `${r.name} (${fmtNum(r.stock)} ${r.unit})`).join(", ")}
+          </div>
+        </div>
+      )}
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="rounded-xl border border-stone-200 bg-white p-4">
+          <h3 className="font-semibold text-stone-700 mb-2">Finished Goods Stock</h3>
+          <table className="w-full">
+            <thead><tr><Th>Product</Th><Th className="text-right">Stock</Th><Th className="text-right">Unit Cost</Th><Th className="text-right">Sell Price</Th></tr></thead>
+            <tbody>
+              {data.products.map((p) => (
+                <tr key={p.id} className="border-t border-stone-100">
+                  <Td>{p.name}</Td>
+                  <Td className="text-right font-mono">{p.stock}</Td>
+                  <Td className="text-right font-mono">{fmtMoney(productFullCost(p, data.rawMaterials))}</Td>
+                  <Td className="text-right font-mono">{fmtMoney(p.sellingPrice)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="rounded-xl border border-stone-200 bg-white p-4">
+          <h3 className="font-semibold text-stone-700 mb-2">Raw Material Stock</h3>
+          <table className="w-full">
+            <thead><tr><Th>Material</Th><Th className="text-right">Stock</Th><Th className="text-right">Cost/unit</Th><Th className="text-right">Value</Th></tr></thead>
+            <tbody>
+              {data.rawMaterials.map((r) => (
+                <tr key={r.id} className="border-t border-stone-100">
+                  <Td>{r.name}</Td>
+                  <Td className={`text-right font-mono ${r.stock <= r.minStock ? "text-rose-600 font-bold" : ""}`}>{fmtNum(r.stock)} {r.unit}</Td>
+                  <Td className="text-right font-mono">{fmtMoney(r.costPerUnit)}</Td>
+                  <Td className="text-right font-mono">{fmtMoney(r.stock * r.costPerUnit)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   RAW MATERIALS TAB
+   ============================================================ */
+function RawMaterialsTab({ data, setData, refresh }) {
+  const update = (id, field, value) => {
+    setData((d) => ({ ...d, rawMaterials: d.rawMaterials.map((r) => r.id === id ? { ...r, [field]: field === "name" || field === "unit" ? value : Number(value) } : r) }));
+    debounce("material-" + id, () => {
+      setData((d) => {
+        const row = d.rawMaterials.find((r) => r.id === id);
+        if (row) db.upsertMaterial(row);
+        return d;
+      });
+    });
+  };
+  const addRow = async () => {
+    await db.insertMaterial();
+    refresh();
+  };
+  const removeRow = async (id) => {
+    await db.deleteMaterial(id);
+    refresh();
+  };
+
+  return (
+    <div>
+      <SectionHeader icon={I.raw} title="Raw Material Inventory" action={<Btn onClick={addRow}><Icon>{I.plus}</Icon>Add Material</Btn>} />
+      <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
+        <table className="w-full">
+          <thead className="bg-stone-50"><tr><Th>Name</Th><Th>Unit</Th><Th>Stock</Th><Th>Reorder Level</Th><Th>Cost / Unit</Th><Th>Stock Value</Th><Th></Th></tr></thead>
+          <tbody>
+            {data.rawMaterials.map((r) => (
+              <tr key={r.id} className="border-t border-stone-100">
+                <Td><Input value={r.name} onChange={(e) => update(r.id, "name", e.target.value)} /></Td>
+                <Td><Input value={r.unit} onChange={(e) => update(r.id, "unit", e.target.value)} className="w-20" /></Td>
+                <Td><Input type="number" value={r.stock} onChange={(e) => update(r.id, "stock", e.target.value)} className="w-24" /></Td>
+                <Td><Input type="number" value={r.minStock} onChange={(e) => update(r.id, "minStock", e.target.value)} className="w-24" /></Td>
+                <Td><Input type="number" value={r.costPerUnit} onChange={(e) => update(r.id, "costPerUnit", e.target.value)} className="w-24" /></Td>
+                <Td className="font-mono">{fmtMoney(r.stock * r.costPerUnit)}</Td>
+                <Td><Btn variant="danger" onClick={() => removeRow(r.id)}><Icon>{I.trash}</Icon></Btn></Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-stone-400 mt-2">Stock and cost are also updated automatically when you log purchases or production. Changes sync to all devices within a few seconds.</p>
+    </div>
+  );
+}
+
+/* ============================================================
+   PRODUCTS / DESIGNS TAB (with BOM)
+   ============================================================ */
+function ProductsTab({ data, setData, refresh }) {
+  const [open, setOpen] = useState(null);
+  const updateProduct = (id, field, value) => {
+    setData((d) => ({ ...d, products: d.products.map((p) => p.id === id ? { ...p, [field]: field === "name" ? value : Number(value) } : p) }));
+    debounce("product-" + id, () => {
+      setData((d) => {
+        const row = d.products.find((p) => p.id === id);
+        if (row) db.upsertProduct(row);
+        return d;
+      });
+    });
+  };
+  const addProduct = async () => { await db.insertProduct(); refresh(); };
+  const removeProduct = async (id) => { await db.deleteProduct(id); refresh(); };
+  const updateBom = (productId, materialId, qty) => {
+    setData((d) => ({ ...d, products: d.products.map((p) => {
+      if (p.id !== productId) return p;
+      const exists = p.bom.find((b) => b.materialId === materialId);
+      let bom;
+      if (exists) bom = p.bom.map((b) => b.materialId === materialId ? { ...b, qty: Number(qty) } : b);
+      else bom = [...p.bom, { materialId, qty: Number(qty) }];
+      return { ...p, bom: bom.filter((b) => b.qty > 0) };
+    })}));
+    debounce("bom-" + productId + "-" + materialId, () => {
+      db.upsertBom(productId, materialId, Number(qty)).then(refresh);
+    });
+  };
+  const bomQty = (p, materialId) => p.bom.find((b) => b.materialId === materialId)?.qty || 0;
+
+  return (
+    <div>
+      <SectionHeader icon={I.products} title="Products / Designs (Bill of Materials)" action={<Btn onClick={addProduct}><Icon>{I.plus}</Icon>Add Design</Btn>} />
+      <div className="space-y-3">
+        {data.products.map((p) => {
+          const matCost = productMaterialCost(p, data.rawMaterials);
+          const fullCost = matCost + (Number(p.laborCost) || 0);
+          const margin = p.sellingPrice - fullCost;
+          return (
+            <div key={p.id} className="rounded-xl border border-stone-200 bg-white overflow-hidden">
+              <div className="flex items-center justify-between p-3 bg-stone-50 cursor-pointer flex-wrap gap-2" onClick={() => setOpen(open === p.id ? null : p.id)}>
+                <div className="flex items-center gap-2">
+                  <Icon>{open === p.id ? I.down : I.right}</Icon>
+                  <Input value={p.name} onClick={(e) => e.stopPropagation()} onChange={(e) => updateProduct(p.id, "name", e.target.value)} className="font-semibold w-40" />
+                </div>
+                <div className="flex items-center gap-3 text-sm flex-wrap">
+                  <span className="text-stone-500">Stock: <b className="font-mono">{p.stock}</b></span>
+                  <span className="text-stone-500">Cost: <b className="font-mono">{fmtMoney(fullCost)}</b></span>
+                  <span className={margin >= 0 ? "text-emerald-600" : "text-rose-600"}>Margin: <b className="font-mono">{fmtMoney(margin)}</b></span>
+                  <Btn variant="danger" onClick={(e) => { e.stopPropagation(); removeProduct(p.id); }}><Icon>{I.trash}</Icon></Btn>
+                </div>
+              </div>
+              {open === p.id && (
+                <div className="p-4 grid md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-stone-500 uppercase">Selling Price</label>
+                    <Input type="number" value={p.sellingPrice} onChange={(e) => updateProduct(p.id, "sellingPrice", e.target.value)} />
+                    <label className="text-xs font-semibold text-stone-500 uppercase">Labor Cost / Unit</label>
+                    <Input type="number" value={p.laborCost} onChange={(e) => updateProduct(p.id, "laborCost", e.target.value)} />
+                    <label className="text-xs font-semibold text-stone-500 uppercase">Current Stock (units)</label>
+                    <Input type="number" value={p.stock} onChange={(e) => updateProduct(p.id, "stock", e.target.value)} />
+                    <div className="text-sm text-stone-500 pt-2 border-t border-stone-100 mt-2">
+                      Material cost/unit: <b className="font-mono">{fmtMoney(matCost)}</b><br/>
+                      Total cost/unit: <b className="font-mono">{fmtMoney(fullCost)}</b><br/>
+                      Profit/unit: <b className={margin >= 0 ? "text-emerald-600 font-mono" : "text-rose-600 font-mono"}>{fmtMoney(margin)}</b>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-stone-500 uppercase">Raw Material per Unit (BOM)</label>
+                    <table className="w-full mt-1">
+                      <tbody>
+                        {data.rawMaterials.map((r) => (
+                          <tr key={r.id} className="border-t border-stone-100">
+                            <Td className="pl-0">{r.name} <span className="text-stone-400">({r.unit})</span></Td>
+                            <Td className="w-28 pr-0"><Input type="number" step="0.01" value={bomQty(p, r.id)} onChange={(e) => updateBom(p.id, r.id, e.target.value)} /></Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   PRODUCTION (WORKFLOW) TAB
+   ============================================================ */
+function ProductionTab({ data, setData, refresh }) {
+  const [form, setForm] = useState({ date: today(), productId: data.products[0]?.id || "", qty: 1, stage: "Completed", notes: "" });
+  const STAGES = ["Cutting", "Stitching", "Assembly", "Finishing", "QC & Packing", "Completed"];
+  const product = data.products.find((p) => p.id === form.productId);
+  const requirement = product ? product.bom.map((b) => {
+    const r = data.rawMaterials.find((x) => x.id === b.materialId);
+    return { name: r?.name, unit: r?.unit, needed: b.qty * Number(form.qty || 0), available: r?.stock };
+  }) : [];
+  const insufficient = requirement.filter((r) => r.needed > r.available);
+
+  const submit = async () => {
+    if (!product || Number(form.qty) <= 0) return;
+    const qty = Number(form.qty);
+    const cost = productFullCost(product, data.rawMaterials) * qty;
+
+    if (form.stage === "Completed") {
+      // consume raw materials
+      for (const b of product.bom) {
+        await db.adjustMaterialStock(b.materialId, -b.qty * qty);
+      }
+      // increase finished stock
+      await db.adjustProductStock(product.id, qty);
+    }
+    await db.insertProduction({ date: form.date, productId: product.id, qty, stage: form.stage, notes: form.notes, cost });
+    setForm((f) => ({ ...f, qty: 1, notes: "" }));
+    refresh();
+  };
+  const removeEntry = async (id) => { await db.deleteProduction(id); refresh(); };
+
+  return (
+    <div>
+      <SectionHeader icon={I.production} title="Production Workflow" />
+      <div className="grid md:grid-cols-3 gap-4">
+        <div className="md:col-span-1 rounded-xl border border-stone-200 bg-white p-4 space-y-2">
+          <h3 className="font-semibold text-stone-700 mb-1">Log Production Batch</h3>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Date</label>
+          <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          <label className="text-xs font-semibold text-stone-500 uppercase">Design</label>
+          <Select value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })}>
+            {data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </Select>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Quantity (pairs)</label>
+          <Input type="number" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} />
+          <label className="text-xs font-semibold text-stone-500 uppercase">Stage</label>
+          <Select value={form.stage} onChange={(e) => setForm({ ...form, stage: e.target.value })}>
+            {STAGES.map((s) => <option key={s}>{s}</option>)}
+          </Select>
+          <p className="text-xs text-stone-400">Raw material is deducted & finished stock increased only when stage = "Completed".</p>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Notes</label>
+          <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional" />
+          {insufficient.length > 0 && form.stage === "Completed" && (
+            <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2">Insufficient stock: {insufficient.map((r) => r.name).join(", ")}</div>
+          )}
+          <Btn onClick={submit} className="w-full justify-center mt-1"><Icon>{I.save}</Icon>Save Entry</Btn>
+          {product && (
+            <div className="mt-2 text-xs text-stone-500 border-t border-stone-100 pt-2">
+              <div className="font-semibold mb-1">Material needed for {form.qty} unit(s):</div>
+              {requirement.map((r) => (
+                <div key={r.name} className={r.needed > r.available ? "text-rose-600" : ""}>{r.name}: {fmtNum(r.needed)} {r.unit} (avail. {fmtNum(r.available)})</div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="md:col-span-2 rounded-xl border border-stone-200 bg-white overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-stone-50"><tr><Th>Date</Th><Th>Design</Th><Th>Qty</Th><Th>Stage</Th><Th>Cost</Th><Th>Notes</Th><Th></Th></tr></thead>
+            <tbody>
+              {data.production.map((p) => {
+                const prod = data.products.find((x) => x.id === p.productId);
+                return (
+                  <tr key={p.id} className="border-t border-stone-100">
+                    <Td>{p.date}</Td><Td>{prod?.name || "—"}</Td><Td className="font-mono">{p.qty}</Td>
+                    <Td><Tag tone={p.stage === "Completed" ? "good" : "warn"}>{p.stage}</Tag></Td>
+                    <Td className="font-mono">{fmtMoney(p.cost)}</Td><Td className="text-stone-400">{p.notes}</Td>
+                    <Td><Btn variant="danger" onClick={() => removeEntry(p.id)}><Icon>{I.trash}</Icon></Btn></Td>
+                  </tr>
+                );
+              })}
+              {data.production.length === 0 && <tr><Td colSpan={7} className="text-center text-stone-400 py-6">No production logged yet.</Td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   PURCHASES TAB
+   ============================================================ */
+function PurchasesTab({ data, setData, refresh }) {
+  const [form, setForm] = useState({ date: today(), materialId: data.rawMaterials[0]?.id || "", qty: "", rate: "" });
+  const submit = async () => {
+    if (!form.materialId || !form.qty || !form.rate) return;
+    const qty = Number(form.qty);
+    const rate = Number(form.rate);
+    await db.adjustMaterialStock(form.materialId, qty);
+    const material = data.rawMaterials.find((r) => r.id === form.materialId);
+    if (material) await db.upsertMaterial({ ...material, costPerUnit: rate });
+    await db.insertPurchase({ date: form.date, materialId: form.materialId, qty, rate });
+    setForm((f) => ({ ...f, qty: "", rate: "" }));
+    refresh();
+  };
+  const removeEntry = async (id) => { await db.deletePurchase(id); refresh(); };
+
+  return (
+    <div>
+      <SectionHeader icon={I.purchases} title="Raw Material Purchases" />
+      <div className="grid md:grid-cols-3 gap-4">
+        <div className="rounded-xl border border-stone-200 bg-white p-4 space-y-2">
+          <h3 className="font-semibold text-stone-700 mb-1">New Purchase</h3>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Date</label>
+          <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          <label className="text-xs font-semibold text-stone-500 uppercase">Material</label>
+          <Select value={form.materialId} onChange={(e) => setForm({ ...form, materialId: e.target.value })}>
+            {data.rawMaterials.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.unit})</option>)}
+          </Select>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Quantity</label>
+          <Input type="number" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} />
+          <label className="text-xs font-semibold text-stone-500 uppercase">Rate per Unit (₹)</label>
+          <Input type="number" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} />
+          <div className="text-sm text-stone-500">Total: <b className="font-mono">{fmtMoney((form.qty || 0) * (form.rate || 0))}</b></div>
+          <Btn onClick={submit} className="w-full justify-center"><Icon>{I.save}</Icon>Save Purchase</Btn>
+          <p className="text-xs text-stone-400">Updates raw material stock and sets the latest cost per unit.</p>
+        </div>
+        <div className="md:col-span-2 rounded-xl border border-stone-200 bg-white overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-stone-50"><tr><Th>Date</Th><Th>Material</Th><Th>Qty</Th><Th>Rate</Th><Th>Total</Th><Th></Th></tr></thead>
+            <tbody>
+              {data.purchases.map((p) => {
+                const mtl = data.rawMaterials.find((r) => r.id === p.materialId);
+                return (
+                  <tr key={p.id} className="border-t border-stone-100">
+                    <Td>{p.date}</Td><Td>{mtl?.name || "—"}</Td>
+                    <Td className="font-mono">{fmtNum(p.qty)} {mtl?.unit}</Td>
+                    <Td className="font-mono">{fmtMoney(p.rate)}</Td>
+                    <Td className="font-mono">{fmtMoney(p.qty * p.rate)}</Td>
+                    <Td><Btn variant="danger" onClick={() => removeEntry(p.id)}><Icon>{I.trash}</Icon></Btn></Td>
+                  </tr>
+                );
+              })}
+              {data.purchases.length === 0 && <tr><Td colSpan={6} className="text-center text-stone-400 py-6">No purchases logged yet.</Td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   SALES TAB
+   ============================================================ */
+function SalesTab({ data, setData, refresh }) {
+  const firstProduct = data.products[0];
+  const [form, setForm] = useState({ date: today(), clientId: data.clients[0]?.id || "", productId: firstProduct?.id || "", qty: 1, rate: firstProduct?.sellingPrice || 0 });
+  useEffect(() => {
+    const p = data.products.find((x) => x.id === form.productId);
+    if (p) setForm((f) => ({ ...f, rate: p.sellingPrice }));
+  }, [form.productId]);
+
+  const submit = async () => {
+    const p = data.products.find((x) => x.id === form.productId);
+    if (!p || !form.clientId || Number(form.qty) <= 0) return;
+    const qty = Number(form.qty);
+    await db.adjustProductStock(p.id, -qty);
+    await db.insertSale({ date: form.date, clientId: form.clientId, productId: p.id, qty, rate: Number(form.rate) });
+    setForm((f) => ({ ...f, qty: 1 }));
+    refresh();
+  };
+  const removeEntry = async (id) => { await db.deleteSale(id); refresh(); };
+  const product = data.products.find((p) => p.id === form.productId);
+
+  return (
+    <div>
+      <SectionHeader icon={I.sales} title="Sales" />
+      <div className="grid md:grid-cols-3 gap-4">
+        <div className="rounded-xl border border-stone-200 bg-white p-4 space-y-2">
+          <h3 className="font-semibold text-stone-700 mb-1">New Sale</h3>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Date</label>
+          <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          <label className="text-xs font-semibold text-stone-500 uppercase">Client</label>
+          <Select value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })}>
+            {data.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Design</label>
+          <Select value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })}>
+            {data.products.map((p) => <option key={p.id} value={p.id}>{p.name} (stock: {p.stock})</option>)}
+          </Select>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Quantity (pairs)</label>
+          <Input type="number" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} />
+          <label className="text-xs font-semibold text-stone-500 uppercase">Rate per Unit (₹)</label>
+          <Input type="number" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} />
+          {product && Number(form.qty) > product.stock && (
+            <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2">Only {product.stock} in stock.</div>
+          )}
+          <div className="text-sm text-stone-500">Total: <b className="font-mono">{fmtMoney((form.qty || 0) * (form.rate || 0))}</b></div>
+          <Btn onClick={submit} className="w-full justify-center"><Icon>{I.save}</Icon>Save Sale</Btn>
+        </div>
+        <div className="md:col-span-2 rounded-xl border border-stone-200 bg-white overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-stone-50"><tr><Th>Date</Th><Th>Client</Th><Th>Design</Th><Th>Qty</Th><Th>Rate</Th><Th>Total</Th><Th>Profit</Th><Th></Th></tr></thead>
+            <tbody>
+              {data.sales.map((s) => {
+                const c = data.clients.find((x) => x.id === s.clientId);
+                const p = data.products.find((x) => x.id === s.productId);
+                const cost = p ? productFullCost(p, data.rawMaterials) : 0;
+                const profit = (s.rate - cost) * s.qty;
+                return (
+                  <tr key={s.id} className="border-t border-stone-100">
+                    <Td>{s.date}</Td><Td>{c?.name || "—"}</Td><Td>{p?.name || "—"}</Td>
+                    <Td className="font-mono">{s.qty}</Td><Td className="font-mono">{fmtMoney(s.rate)}</Td>
+                    <Td className="font-mono">{fmtMoney(s.qty * s.rate)}</Td>
+                    <Td className={`font-mono ${profit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{fmtMoney(profit)}</Td>
+                    <Td><Btn variant="danger" onClick={() => removeEntry(s.id)}><Icon>{I.trash}</Icon></Btn></Td>
+                  </tr>
+                );
+              })}
+              {data.sales.length === 0 && <tr><Td colSpan={8} className="text-center text-stone-400 py-6">No sales logged yet.</Td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   LABOR & ATTENDANCE TAB
+   ============================================================ */
+function LaborTab({ data, setData, refresh }) {
+  const updateLabor = (id, field, value) => {
+    setData((d) => ({
+      ...d,
+      labor: d.labor.map((l) => l.id === id
+        ? { ...l, [field]: (field === "name" || field === "role" || field === "wageType") ? value : Number(value) }
+        : l)
+    }));
+    debounce("labor-" + id, () => {
+      setData((d) => {
+        const row = d.labor.find((l) => l.id === id);
+        if (row) db.upsertLabor(row);
+        return d;
+      });
+    });
+  };
+  const addLabor = async () => { await db.insertLabor(); refresh(); };
+  const removeLabor = async (id) => { await db.deleteLabor(id); refresh(); };
+
+  const [logDate, setLogDate] = useState(today());
+  const [entries, setEntries] = useState(() => {
+    const obj = {};
+    data.labor.forEach((l) => { obj[l.id] = { worked: true, units: 0 }; });
+    return obj;
+  });
+  useEffect(() => {
+    setEntries((prev) => {
+      const obj = { ...prev };
+      data.labor.forEach((l) => { if (!obj[l.id]) obj[l.id] = { worked: true, units: 0 }; });
+      return obj;
+    });
+  }, [data.labor.length]);
+
+  const setEntry = (laborId, field, value) => setEntries((prev) => ({ ...prev, [laborId]: { ...prev[laborId], [field]: value } }));
+
+  const computeWage = (l, entry) => {
+    if (!entry) return 0;
+    if (l.wageType === "piece") return Number(entry.units || 0) * Number(l.pieceRate || 0);
+    return entry.worked ? Number(l.dailyWage || 0) : 0;
+  };
+
+  const totalWageToday = data.labor.reduce((s, l) => s + computeWage(l, entries[l.id]), 0);
+  const totalUnitsToday = data.labor.reduce((s, l) => l.wageType === "piece" ? s + Number(entries[l.id]?.units || 0) : s, 0);
+  const presentTodayCount = data.labor.filter((l) => {
+    const e = entries[l.id];
+    return l.wageType === "piece" ? Number(e?.units || 0) > 0 : !!e?.worked;
+  }).length;
+
+  const saveDay = async () => {
+    const rows = data.labor.map((l) => {
+      const e = entries[l.id] || { worked: false, units: 0 };
+      const wageCost = computeWage(l, e);
+      const worked = l.wageType === "piece" ? Number(e.units || 0) > 0 : !!e.worked;
+      return { laborId: l.id, worked, units: Number(e.units || 0), wageCost };
+    });
+    await db.replaceAttendanceForDate(logDate, rows);
+    refresh();
+  };
+
+  const histDates = [...new Set(data.attendance.map((a) => a.date))].sort((a, b) => b.localeCompare(a));
+  const removeDay = async (date) => { await db.deleteAttendanceDate(date); refresh(); };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <SectionHeader icon={I.labor} title={`Labor Roster (${data.labor.length})`} action={<Btn onClick={addLabor}><Icon>{I.plus}</Icon>Add Worker</Btn>} />
+        <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
+          <table className="w-full">
+            <thead className="bg-stone-50"><tr><Th>Name</Th><Th>Role</Th><Th>Wage Type</Th><Th>Daily Wage (₹)</Th><Th>Rate / Unit (₹)</Th><Th></Th></tr></thead>
+            <tbody>
+              {data.labor.map((l) => (
+                <tr key={l.id} className="border-t border-stone-100">
+                  <Td><Input value={l.name} onChange={(e) => updateLabor(l.id, "name", e.target.value)} /></Td>
+                  <Td><Select value={l.role} onChange={(e) => updateLabor(l.id, "role", e.target.value)}>{ROLES.map((r) => <option key={r}>{r}</option>)}</Select></Td>
+                  <Td>
+                    <Select value={l.wageType} onChange={(e) => updateLabor(l.id, "wageType", e.target.value)}>
+                      <option value="daily">Daily Wage</option>
+                      <option value="piece">Per Unit (Piece-rate)</option>
+                    </Select>
+                  </Td>
+                  <Td><Input type="number" value={l.dailyWage} onChange={(e) => updateLabor(l.id, "dailyWage", e.target.value)} className="w-28" disabled={l.wageType === "piece"} /></Td>
+                  <Td><Input type="number" value={l.pieceRate} onChange={(e) => updateLabor(l.id, "pieceRate", e.target.value)} className="w-28" disabled={l.wageType === "daily"} /></Td>
+                  <Td><Btn variant="danger" onClick={() => removeLabor(l.id)}><Icon>{I.trash}</Icon></Btn></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-stone-400 mt-2">Set each worker's pay type: a fixed <b>Daily Wage</b>, or a <b>Per Unit</b> rate (e.g. ₹30/pair — if they make 100 pairs, wage = ₹3,000).</p>
+      </div>
+
+      <div>
+        <SectionHeader icon={I.production} title="Daily Wage Log" />
+        <div className="rounded-xl border border-stone-200 bg-white p-4">
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <label className="text-xs font-semibold text-stone-500 uppercase">Date</label>
+            <Input type="date" value={logDate} onChange={(e) => setLogDate(e.target.value)} className="w-44" />
+            <Btn onClick={saveDay} className="ml-auto"><Icon>{I.save}</Icon>Save Day</Btn>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-stone-50"><tr><Th>Worker</Th><Th>Type</Th><Th>Worked / Units</Th><Th className="text-right">Wage</Th></tr></thead>
+              <tbody>
+                {data.labor.map((l) => {
+                  const e = entries[l.id] || { worked: true, units: 0 };
+                  return (
+                    <tr key={l.id} className="border-t border-stone-100">
+                      <Td>{l.name} <span className="text-stone-400">({l.role})</span></Td>
+                      <Td><Tag tone={l.wageType === "piece" ? "warn" : "default"}>{l.wageType === "piece" ? "Per Unit" : "Daily"}</Tag></Td>
+                      <Td>
+                        {l.wageType === "piece" ? (
+                          <Input type="number" value={e.units} onChange={(ev) => setEntry(l.id, "units", ev.target.value)} className="w-24" placeholder="Units made" />
+                        ) : (
+                          <label className="flex items-center gap-2">
+                            <input type="checkbox" checked={!!e.worked} onChange={(ev) => setEntry(l.id, "worked", ev.target.checked)} className="w-4 h-4" />
+                            <span className="text-sm text-stone-500">Worked</span>
+                          </label>
+                        )}
+                      </Td>
+                      <Td className="text-right font-mono">{fmtMoney(computeWage(l, e))}</Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-stone-200 font-semibold">
+                  <Td colSpan={3}>Total — {presentTodayCount} worked{totalUnitsToday > 0 ? `, ${totalUnitsToday} piece-rate units` : ""}</Td>
+                  <Td className="text-right font-mono">{fmtMoney(totalWageToday)}</Td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="text-xs text-stone-400 mt-2">Saving re-writes the log for this date (so you can edit a day by changing the date and re-saving).</p>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="font-semibold text-stone-700 mb-2">Wage Log History</h3>
+        <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
+          <table className="w-full">
+            <thead className="bg-stone-50"><tr><Th>Date</Th><Th>Workers Present</Th><Th>Piece-rate Units</Th><Th>Total Wage</Th><Th></Th></tr></thead>
+            <tbody>
+              {histDates.map((date) => {
+                const dayEntries = data.attendance.filter((a) => a.date === date);
+                const present = dayEntries.filter((a) => a.worked).length;
+                const units = dayEntries.reduce((s, a) => s + Number(a.units || 0), 0);
+                const wage = dayEntries.reduce((s, a) => s + Number(a.wageCost || 0), 0);
+                return (
+                  <tr key={date} className="border-t border-stone-100">
+                    <Td>{date}</Td><Td className="font-mono">{present}</Td><Td className="font-mono">{units || "—"}</Td>
+                    <Td className="font-mono">{fmtMoney(wage)}</Td>
+                    <Td><Btn variant="danger" onClick={() => removeDay(date)}><Icon>{I.trash}</Icon></Btn></Td>
+                  </tr>
+                );
+              })}
+              {histDates.length === 0 && <tr><Td colSpan={5} className="text-center text-stone-400 py-6">No wage logs yet.</Td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   CLIENTS TAB
+   ============================================================ */
+function ClientsTab({ data, setData, refresh }) {
+  const update = (id, field, value) => {
+    setData((d) => ({ ...d, clients: d.clients.map((c) => c.id === id ? { ...c, [field]: value } : c) }));
+    debounce("client-" + id, () => {
+      setData((d) => {
+        const row = d.clients.find((c) => c.id === id);
+        if (row) db.upsertClient(row);
+        return d;
+      });
+    });
+  };
+  const addClient = async () => { await db.insertClient(); refresh(); };
+  const removeClient = async (id) => { await db.deleteClient(id); refresh(); };
+  const clientStats = (clientId) => {
+    const sales = data.sales.filter((s) => s.clientId === clientId);
+    const revenue = sales.reduce((s, x) => s + x.qty * x.rate, 0);
+    const units = sales.reduce((s, x) => s + x.qty, 0);
+    return { revenue, units, orders: sales.length };
+  };
+  return (
+    <div>
+      <SectionHeader icon={I.clients} title={`Clients (${data.clients.length})`} action={<Btn onClick={addClient}><Icon>{I.plus}</Icon>Add Client</Btn>} />
+      <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
+        <table className="w-full">
+          <thead className="bg-stone-50"><tr><Th>Name</Th><Th>Contact</Th><Th>Orders</Th><Th>Units Bought</Th><Th>Revenue</Th><Th></Th></tr></thead>
+          <tbody>
+            {data.clients.map((c) => {
+              const stats = clientStats(c.id);
+              return (
+                <tr key={c.id} className="border-t border-stone-100">
+                  <Td><Input value={c.name} onChange={(e) => update(c.id, "name", e.target.value)} /></Td>
+                  <Td><Input value={c.contact} onChange={(e) => update(c.id, "contact", e.target.value)} placeholder="Phone / email" /></Td>
+                  <Td className="font-mono">{stats.orders}</Td>
+                  <Td className="font-mono">{stats.units}</Td>
+                  <Td className="font-mono">{fmtMoney(stats.revenue)}</Td>
+                  <Td><Btn variant="danger" onClick={() => removeClient(c.id)}><Icon>{I.trash}</Icon></Btn></Td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   EXPENSES TAB
+   ============================================================ */
+const EXPENSE_CATEGORIES = ["Rent", "Electricity", "Transport", "Maintenance", "Marketing", "Misc / Other"];
+function ExpensesTab({ data, setData, refresh }) {
+  const [form, setForm] = useState({ date: today(), category: EXPENSE_CATEGORIES[0], amount: "", note: "" });
+  const submit = async () => {
+    if (!form.amount) return;
+    await db.insertExpense({ date: form.date, category: form.category, amount: Number(form.amount), note: form.note });
+    setForm((f) => ({ ...f, amount: "", note: "" }));
+    refresh();
+  };
+  const removeEntry = async (id) => { await db.deleteExpense(id); refresh(); };
+  return (
+    <div>
+      <SectionHeader icon={I.expenses} title="Other Expenses (Overheads)" />
+      <div className="grid md:grid-cols-3 gap-4">
+        <div className="rounded-xl border border-stone-200 bg-white p-4 space-y-2">
+          <h3 className="font-semibold text-stone-700 mb-1">New Expense</h3>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Date</label>
+          <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          <label className="text-xs font-semibold text-stone-500 uppercase">Category</label>
+          <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{EXPENSE_CATEGORIES.map((c) => <option key={c}>{c}</option>)}</Select>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Amount (₹)</label>
+          <Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+          <label className="text-xs font-semibold text-stone-500 uppercase">Note</label>
+          <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Optional" />
+          <Btn onClick={submit} className="w-full justify-center"><Icon>{I.save}</Icon>Save Expense</Btn>
+          <p className="text-xs text-stone-400">Labor wages are logged separately in the Labor tab.</p>
+        </div>
+        <div className="md:col-span-2 rounded-xl border border-stone-200 bg-white overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-stone-50"><tr><Th>Date</Th><Th>Category</Th><Th>Amount</Th><Th>Note</Th><Th></Th></tr></thead>
+            <tbody>
+              {data.expenses.map((e) => (
+                <tr key={e.id} className="border-t border-stone-100">
+                  <Td>{e.date}</Td><Td>{e.category}</Td><Td className="font-mono">{fmtMoney(e.amount)}</Td><Td className="text-stone-400">{e.note}</Td>
+                  <Td><Btn variant="danger" onClick={() => removeEntry(e.id)}><Icon>{I.trash}</Icon></Btn></Td>
+                </tr>
+              ))}
+              {data.expenses.length === 0 && <tr><Td colSpan={5} className="text-center text-stone-400 py-6">No expenses logged yet.</Td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   REPORTS TAB
+   ============================================================ */
+function Row({ label, value, bold, tone, highlight, muted }) {
+  const toneClass = tone === "good" ? "text-emerald-600" : tone === "bad" ? "text-rose-600" : "";
+  return (
+    <tr className={`border-t border-stone-100 ${highlight ? "bg-amber-50" : ""}`}>
+      <Td className={muted ? "text-stone-400" : ""}>{label}</Td>
+      <Td className={`text-right font-mono ${bold ? "font-bold" : ""} ${toneClass} ${muted ? "text-stone-400" : ""}`}>{value}</Td>
+    </tr>
+  );
+}
+function ReportsTab({ data }) {
+  const [range, setRange] = useState("daily");
+  const m = periodMetrics(data, range);
+  return (
+    <div className="space-y-5">
+      <SectionHeader icon={I.reports} title="Reports" action={
+        <Select value={range} onChange={(e) => setRange(e.target.value)} className="w-48">
+          {Object.entries(RANGES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </Select>
+      } />
+      <div>
+        <h3 className="font-semibold text-stone-700 mb-2">Profit & Loss — {RANGES[range].label}</h3>
+        <div className="rounded-xl border border-stone-200 bg-white overflow-hidden">
+          <table className="w-full">
+            <tbody>
+              <Row label="Sales Revenue" value={fmtMoney(m.revenue)} />
+              <Row label="Cost of Goods Sold (material + labor per unit)" value={"– " + fmtMoney(m.cogs)} />
+              <Row label="Gross Profit" value={fmtMoney(m.grossProfit)} bold tone={m.grossProfit >= 0 ? "good" : "bad"} />
+              <Row label="Other Overheads (rent, electricity, etc.)" value={"– " + fmtMoney(m.otherExpenses)} />
+              <Row label="Net Profit" value={fmtMoney(m.netProfit)} bold tone={m.netProfit >= 0 ? "good" : "bad"} highlight />
+              <Row label="Profit Margin" value={m.revenue ? fmtNum((m.netProfit / m.revenue) * 100, 1) + "%" : "—"} />
+              <Row label="Wage Bill Paid (cashflow, ref. only)" value={fmtMoney(m.wageExpense)} muted />
+              <Row label="Raw Material Purchases" value={fmtMoney(m.purchaseSpend)} muted />
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <Card title="ROI" value={fmtNum(m.roi, 2) + "%"} sub={`Investment ${fmtMoney(data.settings.investment)}`} />
+        <Card title="Productivity" value={fmtNum(m.productivity, 2)} sub="units produced / labor-day" />
+        <Card title="Inventory Turnover" value={fmtNum(m.inventoryTurnover, 2) + "x"} sub="COGS ÷ inventory value" />
+        <Card title="Average Sale Value" value={fmtMoney(m.avgSaleValue)} sub={`${m.salesCount} order(s)`} />
+        <Card title="Units Produced" value={fmtNum(m.unitsProduced, 0)} />
+        <Card title="Units Sold" value={fmtNum(m.unitsSold, 0)} />
+        <Card title="Labor-days Present" value={fmtNum(m.presentLaborDays, 0)} />
+        <Card title="Inventory Value (current)" value={fmtMoney(m.invVal.total)} sub={`Raw ${fmtMoney(m.invVal.rawVal)} · Finished ${fmtMoney(m.invVal.finVal)}`} />
+      </div>
+      <div className="grid md:grid-cols-4 gap-3">
+        {Object.entries(RANGES).map(([k, v]) => {
+          const mm = periodMetrics(data, k);
+          return (
+            <div key={k} className="rounded-xl border border-stone-200 bg-white p-4">
+              <div className="text-xs uppercase tracking-wide text-stone-500 font-semibold mb-2">{v.label}</div>
+              <div className="text-sm space-y-1">
+                <div className="flex justify-between"><span>Revenue</span><b className="font-mono">{fmtMoney(mm.revenue)}</b></div>
+                <div className="flex justify-between"><span>Net Profit</span><b className={`font-mono ${mm.netProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{fmtMoney(mm.netProfit)}</b></div>
+                <div className="flex justify-between"><span>ROI</span><b className="font-mono">{fmtNum(mm.roi, 2)}%</b></div>
+                <div className="flex justify-between"><span>Turnover</span><b className="font-mono">{fmtNum(mm.inventoryTurnover, 2)}x</b></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   SETTINGS TAB (with backup/restore for this offline app)
+   ============================================================ */
+function SettingsTab({ data, setData, refresh }) {
+  const updateSettings = (field, value) => {
+    setData((d) => ({ ...d, settings: { ...d.settings, [field]: value } }));
+    debounce("settings", () => {
+      setData((d) => {
+        db.updateSettings(d.settings);
+        return d;
+      });
+    });
+  };
+
+  const exportData = () => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `shoe-erp-backup-${today()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div>
+      <SectionHeader icon={I.settings} title="Settings" />
+      <div className="rounded-xl border border-stone-200 bg-white p-4 space-y-3 max-w-md">
+        <label className="text-xs font-semibold text-stone-500 uppercase">Business Name</label>
+        <Input value={data.settings.unitName} onChange={(e) => updateSettings("unitName", e.target.value)} />
+        <label className="text-xs font-semibold text-stone-500 uppercase">Total Investment / Capital (₹)</label>
+        <Input type="number" value={data.settings.investment} onChange={(e) => updateSettings("investment", Number(e.target.value))} />
+        <p className="text-xs text-stone-400">Used to calculate Return on Investment (ROI) in Reports.</p>
+
+        <div className="pt-3 border-t border-stone-100 space-y-2">
+          <h3 className="font-semibold text-stone-700">Backup</h3>
+          <p className="text-xs text-stone-400">Your data is stored centrally and shared across all devices automatically. Export a JSON snapshot occasionally as an extra safety copy.</p>
+          <div className="flex gap-2 flex-wrap">
+            <Btn onClick={exportData}><Icon>{I.save}</Icon>Export Snapshot</Btn>
+            <Btn variant="ghost" onClick={refresh}>Refresh Data</Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   MAIN APP
+   ============================================================ */
+const TABS = [
+  { key: "dashboard", label: "Dashboard", icon: I.dashboard },
+  { key: "raw", label: "Raw Materials", icon: I.raw },
+  { key: "products", label: "Products", icon: I.products },
+  { key: "production", label: "Production", icon: I.production },
+  { key: "purchases", label: "Purchases", icon: I.purchases },
+  { key: "sales", label: "Sales", icon: I.sales },
+  { key: "labor", label: "Labor", icon: I.labor },
+  { key: "clients", label: "Clients", icon: I.clients },
+  { key: "expenses", label: "Expenses", icon: I.expenses },
+  { key: "reports", label: "Reports", icon: I.reports },
+  { key: "settings", label: "Settings", icon: I.settings },
+];
+
+function App() {
+  const [data, setData, loaded, error, refresh] = useERPData();
+  const [tab, setTab] = useState("dashboard");
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="max-w-md text-center space-y-3">
+          <div className="text-3xl">⚠️</div>
+          <h2 className="font-bold text-lg text-stone-800">Couldn't connect to the database</h2>
+          <p className="text-sm text-stone-500">{error}</p>
+          <p className="text-xs text-stone-400">Check your internet connection, then tap retry.</p>
+          <Btn onClick={refresh} className="mx-auto">Retry</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  if (!loaded || !data) return <div className="min-h-screen flex items-center justify-center text-stone-500">Loading workshop ledger…</div>;
+
+  const TabContent = {
+    dashboard: <Dashboard data={data} />,
+    raw: <RawMaterialsTab data={data} setData={setData} refresh={refresh} />,
+    products: <ProductsTab data={data} setData={setData} refresh={refresh} />,
+    production: <ProductionTab data={data} setData={setData} refresh={refresh} />,
+    purchases: <PurchasesTab data={data} setData={setData} refresh={refresh} />,
+    sales: <SalesTab data={data} setData={setData} refresh={refresh} />,
+    labor: <LaborTab data={data} setData={setData} refresh={refresh} />,
+    clients: <ClientsTab data={data} setData={setData} refresh={refresh} />,
+    expenses: <ExpensesTab data={data} setData={setData} refresh={refresh} />,
+    reports: <ReportsTab data={data} />,
+    settings: <SettingsTab data={data} setData={setData} refresh={refresh} />,
+  }[tab];
+
+  return (
+    <div className="min-h-screen bg-stone-100" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <header className="bg-stone-800 text-stone-50 px-4 py-3 sticky top-0 z-10 shadow-md">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-amber-600 flex items-center justify-center font-bold">SW</div>
+          <div>
+            <div className="font-bold text-lg leading-tight" style={{ fontFamily: "Georgia, serif" }}>{data.settings.unitName}</div>
+            <div className="text-xs text-stone-300">Production & Business Ledger</div>
+          </div>
+        </div>
+      </header>
+      <nav className="bg-white border-b border-stone-200 overflow-x-auto sticky top-[60px] z-10">
+        <div className="flex gap-1 px-2 py-2 min-w-max">
+          {TABS.map((t) => (
+            <button key={t.key} onClick={() => setTab(t.key)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition ${tab === t.key ? "bg-amber-700 text-white" : "text-stone-600 hover:bg-stone-100"}`}>
+              <Icon>{t.icon}</Icon>{t.label}
+            </button>
+          ))}
+        </div>
+      </nav>
+      <main className="p-4 max-w-6xl mx-auto">{TabContent}</main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  }
+</script>
+
+</body>
+</html>
