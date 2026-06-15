@@ -146,7 +146,7 @@ function periodMetrics(data, rangeKey) {
    SUPABASE <-> APP DATA MAPPING
    ============================================================ */
 async function loadAllData() {
-  const [rawMaterials, products, bom, labor, clients, purchases, production, sales, attendance, expenses, settingsRows] = await Promise.all([
+  const [rawMaterials, products, bom, labor, clients, purchases, production, sales, attendance, expenses, settingsRows, colors, productStock] = await Promise.all([
     sb.from("raw_materials").select("*").order("created_at"),
     sb.from("products").select("*").order("created_at"),
     sb.from("product_bom").select("*"),
@@ -158,9 +158,11 @@ async function loadAllData() {
     sb.from("attendance").select("*").order("date", { ascending: false }),
     sb.from("expenses").select("*").order("date", { ascending: false }),
     sb.from("settings").select("*").eq("id", 1).single(),
+    sb.from("colors").select("*").order("sort_order"),
+    sb.from("product_stock").select("*"),
   ]);
 
-  const errors = [rawMaterials, products, bom, labor, clients, purchases, production, sales, attendance, expenses, settingsRows]
+  const errors = [rawMaterials, products, bom, labor, clients, purchases, production, sales, attendance, expenses, settingsRows, colors, productStock]
     .map((r) => r.error).filter(Boolean);
   if (errors.length) throw errors[0];
 
@@ -170,12 +172,21 @@ async function loadAllData() {
     bomByProduct[b.product_id].push({ materialId: b.material_id, qty: Number(b.qty), bomRowId: b.id });
   });
 
+  const stockByProduct = {};
+  (productStock.data || []).forEach((s) => {
+    if (!stockByProduct[s.product_id]) stockByProduct[s.product_id] = [];
+    stockByProduct[s.product_id].push({ id: s.id, colorId: s.color_id, stock: Number(s.stock) });
+  });
+
   return {
+    colors: (colors.data || []).map((c) => ({ id: c.id, name: c.name, hex: c.hex, sortOrder: c.sort_order })),
     rawMaterials: (rawMaterials.data || []).map((r) => ({
-      id: r.id, name: r.name, unit: r.unit, stock: Number(r.stock), costPerUnit: Number(r.cost_per_unit), minStock: Number(r.min_stock),
+      id: r.id, name: r.name, unit: r.unit, stock: Number(r.stock), costPerUnit: Number(r.cost_per_unit), minStock: Number(r.min_stock), colorId: r.color_id || null,
     })),
     products: (products.data || []).map((p) => ({
-      id: p.id, name: p.name, sellingPrice: Number(p.selling_price), laborCost: Number(p.labor_cost), stock: Number(p.stock),
+      id: p.id, name: p.name, sellingPrice: Number(p.selling_price), laborCost: Number(p.labor_cost),
+      stock: (stockByProduct[p.id] || []).reduce((s, x) => s + x.stock, 0),
+      colorStock: stockByProduct[p.id] || [],
       bom: bomByProduct[p.id] || [],
     })),
     labor: (labor.data || []).map((l) => ({
@@ -183,8 +194,8 @@ async function loadAllData() {
     })),
     clients: (clients.data || []).map((c) => ({ id: c.id, name: c.name, contact: c.contact || "" })),
     purchases: (purchases.data || []).map((p) => ({ id: p.id, date: p.date, materialId: p.material_id, qty: Number(p.qty), rate: Number(p.rate) })),
-    production: (production.data || []).map((p) => ({ id: p.id, date: p.date, productId: p.product_id, qty: Number(p.qty), stage: p.stage, notes: p.notes || "", cost: Number(p.cost) })),
-    sales: (sales.data || []).map((s) => ({ id: s.id, date: s.date, clientId: s.client_id, productId: s.product_id, qty: Number(s.qty), rate: Number(s.rate) })),
+    production: (production.data || []).map((p) => ({ id: p.id, date: p.date, productId: p.product_id, colorId: p.color_id || null, qty: Number(p.qty), stage: p.stage, notes: p.notes || "", cost: Number(p.cost) })),
+    sales: (sales.data || []).map((s) => ({ id: s.id, date: s.date, clientId: s.client_id, productId: s.product_id, colorId: s.color_id || null, qty: Number(s.qty), rate: Number(s.rate) })),
     attendance: (attendance.data || []).map((a) => ({ id: a.id, date: a.date, laborId: a.labor_id, worked: a.worked, units: Number(a.units), wageCost: Number(a.wage_cost) })),
     expenses: (expenses.data || []).map((e) => ({ id: e.id, date: e.date, category: e.category, amount: Number(e.amount), note: e.note || "" })),
     settings: settingsRows.data
@@ -230,20 +241,22 @@ function useERPData() {
 const db = {
   // Raw materials
   async upsertMaterial(m) {
-    await sb.from("raw_materials").upsert({ id: m.id, name: m.name, unit: m.unit, stock: m.stock, cost_per_unit: m.costPerUnit, min_stock: m.minStock });
+    await sb.from("raw_materials").upsert({ id: m.id, name: m.name, unit: m.unit, stock: m.stock, cost_per_unit: m.costPerUnit, min_stock: m.minStock, color_id: m.colorId || null });
   },
   async insertMaterial() {
-    const { data } = await sb.from("raw_materials").insert({ name: "New Material", unit: "unit", stock: 0, cost_per_unit: 0, min_stock: 0 }).select().single();
+    const { data } = await sb.from("raw_materials").insert({ name: "New Material", unit: "unit", stock: 0, cost_per_unit: 0, min_stock: 0, color_id: null }).select().single();
     return data;
   },
   async deleteMaterial(id) { await sb.from("raw_materials").delete().eq("id", id); },
 
   // Products + BOM
   async upsertProduct(p) {
-    await sb.from("products").upsert({ id: p.id, name: p.name, selling_price: p.sellingPrice, labor_cost: p.laborCost, stock: p.stock });
+    await sb.from("products").upsert({ id: p.id, name: p.name, selling_price: p.sellingPrice, labor_cost: p.laborCost });
   },
   async insertProduct() {
-    const { data } = await sb.from("products").insert({ name: "New Design", selling_price: 0, labor_cost: 0, stock: 0 }).select().single();
+    const { data } = await sb.from("products").insert({ name: "New Design", selling_price: 0, labor_cost: 0 }).select().single();
+    // create a default "no color" stock row
+    await sb.from("product_stock").insert({ product_id: data.id, color_id: null, stock: 0 });
     return data;
   },
   async deleteProduct(id) { await sb.from("products").delete().eq("id", id); },
@@ -255,6 +268,31 @@ const db = {
     }
     if (existing) await sb.from("product_bom").update({ qty }).eq("id", existing.id);
     else await sb.from("product_bom").insert({ product_id: productId, material_id: materialId, qty });
+  },
+
+  // Product stock per color
+  async adjustProductColorStock(productId, colorId, delta) {
+    const colVal = colorId || null;
+    let query = sb.from("product_stock").select("id, stock").eq("product_id", productId);
+    query = colVal ? query.eq("color_id", colVal) : query.is("color_id", null);
+    const { data: row } = await query.maybeSingle();
+    if (row) {
+      const newStock = Math.max(0, Number(row.stock) + delta);
+      await sb.from("product_stock").update({ stock: newStock }).eq("id", row.id);
+    } else {
+      await sb.from("product_stock").insert({ product_id: productId, color_id: colVal, stock: Math.max(0, delta) });
+    }
+  },
+  async setProductColorStock(productId, colorId, stock) {
+    const colVal = colorId || null;
+    let query = sb.from("product_stock").select("id").eq("product_id", productId);
+    query = colVal ? query.eq("color_id", colVal) : query.is("color_id", null);
+    const { data: row } = await query.maybeSingle();
+    if (row) await sb.from("product_stock").update({ stock: Math.max(0, stock) }).eq("id", row.id);
+    else await sb.from("product_stock").insert({ product_id: productId, color_id: colVal, stock: Math.max(0, stock) });
+  },
+  async removeProductColorVariant(stockRowId) {
+    await sb.from("product_stock").delete().eq("id", stockRowId);
   },
 
   // Labor
@@ -280,11 +318,11 @@ const db = {
   async deletePurchase(id) { await sb.from("purchases").delete().eq("id", id); },
 
   // Production
-  async insertProduction(p) { await sb.from("production").insert({ date: p.date, product_id: p.productId, qty: p.qty, stage: p.stage, notes: p.notes, cost: p.cost }); },
+  async insertProduction(p) { await sb.from("production").insert({ date: p.date, product_id: p.productId, color_id: p.colorId || null, qty: p.qty, stage: p.stage, notes: p.notes, cost: p.cost }); },
   async deleteProduction(id) { await sb.from("production").delete().eq("id", id); },
 
   // Sales
-  async insertSale(s) { await sb.from("sales").insert({ date: s.date, client_id: s.clientId, product_id: s.productId, qty: s.qty, rate: s.rate }); },
+  async insertSale(s) { await sb.from("sales").insert({ date: s.date, client_id: s.clientId, product_id: s.productId, color_id: s.colorId || null, qty: s.qty, rate: s.rate }); },
   async deleteSale(id) { await sb.from("sales").delete().eq("id", id); },
 
   // Attendance
@@ -301,16 +339,19 @@ const db = {
   // Settings
   async updateSettings(s) { await sb.from("settings").update({ unit_name: s.unitName, investment: s.investment }).eq("id", 1); },
 
-  // Stock adjustments (raw material consumption / finished goods)
+  // Colors
+  async upsertColor(c) { await sb.from("colors").upsert({ id: c.id, name: c.name, hex: c.hex, sort_order: c.sortOrder }); },
+  async insertColor() {
+    const { data } = await sb.from("colors").insert({ name: "New Color", hex: "#999999", sort_order: 99 }).select().single();
+    return data;
+  },
+  async deleteColor(id) { await sb.from("colors").delete().eq("id", id); },
+
+  // Stock adjustments (raw material consumption)
   async adjustMaterialStock(id, delta) {
     const { data: row } = await sb.from("raw_materials").select("stock").eq("id", id).single();
     const newStock = Math.max(0, Number(row.stock) + delta);
     await sb.from("raw_materials").update({ stock: newStock }).eq("id", id);
-  },
-  async adjustProductStock(id, delta) {
-    const { data: row } = await sb.from("products").select("stock").eq("id", id).single();
-    const newStock = Math.max(0, Number(row.stock) + delta);
-    await sb.from("products").update({ stock: newStock }).eq("id", id);
   },
 };
 
@@ -357,6 +398,25 @@ function Btn({ children, onClick, variant = "primary", className = "" }) {
 }
 
 /* ============================================================
+   COLOR HELPERS
+   ============================================================ */
+function colorName(colors, colorId) {
+  if (!colorId) return "No color";
+  return colors.find((c) => c.id === colorId)?.name || "Unknown";
+}
+function ColorDot({ hex }) {
+  return <span className="inline-block w-3 h-3 rounded-full border border-stone-300 align-middle mr-1" style={{ background: hex || "#ccc" }}></span>;
+}
+function ColorSelect({ colors, value, onChange, allowNone = true, className = "" }) {
+  return (
+    <Select value={value || ""} onChange={(e) => onChange(e.target.value || null)} className={className}>
+      {allowNone && <option value="">No color</option>}
+      {colors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+    </Select>
+  );
+}
+
+/* ============================================================
    DASHBOARD
    ============================================================ */
 function Dashboard({ data }) {
@@ -392,27 +452,32 @@ function Dashboard({ data }) {
         <div className="rounded-xl border border-stone-200 bg-white p-4">
           <h3 className="font-semibold text-stone-700 mb-2">Finished Goods Stock</h3>
           <table className="w-full">
-            <thead><tr><Th>Product</Th><Th className="text-right">Stock</Th><Th className="text-right">Unit Cost</Th><Th className="text-right">Sell Price</Th></tr></thead>
+            <thead><tr><Th>Product</Th><Th>Color</Th><Th className="text-right">Stock</Th><Th className="text-right">Unit Cost</Th><Th className="text-right">Sell Price</Th></tr></thead>
             <tbody>
-              {data.products.map((p) => (
-                <tr key={p.id} className="border-t border-stone-100">
-                  <Td>{p.name}</Td>
-                  <Td className="text-right font-mono">{p.stock}</Td>
-                  <Td className="text-right font-mono">{fmtMoney(productFullCost(p, data.rawMaterials))}</Td>
-                  <Td className="text-right font-mono">{fmtMoney(p.sellingPrice)}</Td>
-                </tr>
-              ))}
+              {data.products.flatMap((p) => {
+                const rows = p.colorStock.length ? p.colorStock : [{ colorId: null, stock: p.stock }];
+                return rows.map((cs) => (
+                  <tr key={p.id + "-" + (cs.id || cs.colorId || "none")} className="border-t border-stone-100">
+                    <Td className="font-semibold">{p.name}</Td>
+                    <Td>{colorName(data.colors, cs.colorId)}</Td>
+                    <Td className="text-right font-mono">{cs.stock}</Td>
+                    <Td className="text-right font-mono">{fmtMoney(productFullCost(p, data.rawMaterials))}</Td>
+                    <Td className="text-right font-mono">{fmtMoney(p.sellingPrice)}</Td>
+                  </tr>
+                ));
+              })}
             </tbody>
           </table>
         </div>
         <div className="rounded-xl border border-stone-200 bg-white p-4">
           <h3 className="font-semibold text-stone-700 mb-2">Raw Material Stock</h3>
           <table className="w-full">
-            <thead><tr><Th>Material</Th><Th className="text-right">Stock</Th><Th className="text-right">Cost/unit</Th><Th className="text-right">Value</Th></tr></thead>
+            <thead><tr><Th>Material</Th><Th>Color</Th><Th className="text-right">Stock</Th><Th className="text-right">Cost/unit</Th><Th className="text-right">Value</Th></tr></thead>
             <tbody>
               {data.rawMaterials.map((r) => (
                 <tr key={r.id} className="border-t border-stone-100">
                   <Td>{r.name}</Td>
+                  <Td>{colorName(data.colors, r.colorId)}</Td>
                   <Td className={`text-right font-mono ${r.stock <= r.minStock ? "text-rose-600 font-bold" : ""}`}>{fmtNum(r.stock)} {r.unit}</Td>
                   <Td className="text-right font-mono">{fmtMoney(r.costPerUnit)}</Td>
                   <Td className="text-right font-mono">{fmtMoney(r.stock * r.costPerUnit)}</Td>
@@ -431,7 +496,12 @@ function Dashboard({ data }) {
    ============================================================ */
 function RawMaterialsTab({ data, setData, refresh }) {
   const update = (id, field, value) => {
-    setData((d) => ({ ...d, rawMaterials: d.rawMaterials.map((r) => r.id === id ? { ...r, [field]: field === "name" || field === "unit" ? value : Number(value) } : r) }));
+    setData((d) => ({ ...d, rawMaterials: d.rawMaterials.map((r) => {
+      if (r.id !== id) return r;
+      if (field === "name" || field === "unit") return { ...r, [field]: value };
+      if (field === "colorId") return { ...r, colorId: value };
+      return { ...r, [field]: Number(value) };
+    }) }));
     debounce("material-" + id, () => {
       setData((d) => {
         const row = d.rawMaterials.find((r) => r.id === id);
@@ -454,11 +524,12 @@ function RawMaterialsTab({ data, setData, refresh }) {
       <SectionHeader icon={I.raw} title="Raw Material Inventory" action={<Btn onClick={addRow}><Icon>{I.plus}</Icon>Add Material</Btn>} />
       <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
         <table className="w-full">
-          <thead className="bg-stone-50"><tr><Th>Name</Th><Th>Unit</Th><Th>Stock</Th><Th>Reorder Level</Th><Th>Cost / Unit</Th><Th>Stock Value</Th><Th></Th></tr></thead>
+          <thead className="bg-stone-50"><tr><Th>Name</Th><Th>Color</Th><Th>Unit</Th><Th>Stock</Th><Th>Reorder Level</Th><Th>Cost / Unit</Th><Th>Stock Value</Th><Th></Th></tr></thead>
           <tbody>
             {data.rawMaterials.map((r) => (
               <tr key={r.id} className="border-t border-stone-100">
                 <Td><Input value={r.name} onChange={(e) => update(r.id, "name", e.target.value)} /></Td>
+                <Td className="w-32"><ColorSelect colors={data.colors} value={r.colorId} onChange={(v) => update(r.id, "colorId", v)} /></Td>
                 <Td><Input value={r.unit} onChange={(e) => update(r.id, "unit", e.target.value)} className="w-20" /></Td>
                 <Td><Input type="number" value={r.stock} onChange={(e) => update(r.id, "stock", e.target.value)} className="w-24" /></Td>
                 <Td><Input type="number" value={r.minStock} onChange={(e) => update(r.id, "minStock", e.target.value)} className="w-24" /></Td>
@@ -470,7 +541,7 @@ function RawMaterialsTab({ data, setData, refresh }) {
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-stone-400 mt-2">Stock and cost are also updated automatically when you log purchases or production. Changes sync to all devices within a few seconds.</p>
+      <p className="text-xs text-stone-400 mt-2">Set "Color" only for materials that come in multiple colors (e.g. Upper Leather). Leave as "No color" for materials like glue or laces. If the same material comes in several colors, add a separate row per color. Changes sync to all devices within a few seconds.</p>
     </div>
   );
 }
@@ -480,6 +551,7 @@ function RawMaterialsTab({ data, setData, refresh }) {
    ============================================================ */
 function ProductsTab({ data, setData, refresh }) {
   const [open, setOpen] = useState(null);
+  const [newColorId, setNewColorId] = useState({});
   const updateProduct = (id, field, value) => {
     setData((d) => ({ ...d, products: d.products.map((p) => p.id === id ? { ...p, [field]: field === "name" ? value : Number(value) } : p) }));
     debounce("product-" + id, () => {
@@ -507,6 +579,25 @@ function ProductsTab({ data, setData, refresh }) {
   };
   const bomQty = (p, materialId) => p.bom.find((b) => b.materialId === materialId)?.qty || 0;
 
+  const setColorStock = (productId, colorId, value) => {
+    setData((d) => ({ ...d, products: d.products.map((p) => {
+      if (p.id !== productId) return p;
+      const cs = p.colorStock.map((c) => (c.colorId === colorId || (!c.colorId && !colorId)) ? { ...c, stock: Number(value) } : c);
+      return { ...p, colorStock: cs, stock: cs.reduce((s, x) => s + x.stock, 0) };
+    })}));
+    debounce("colorstock-" + productId + "-" + (colorId || "none"), () => {
+      db.setProductColorStock(productId, colorId, Number(value)).then(refresh);
+    });
+  };
+  const addColorVariant = async (productId) => {
+    const colorId = newColorId[productId];
+    if (!colorId) return;
+    await db.setProductColorStock(productId, colorId, 0);
+    setNewColorId((s) => ({ ...s, [productId]: "" }));
+    refresh();
+  };
+  const removeColorVariant = async (rowId) => { await db.removeProductColorVariant(rowId); refresh(); };
+
   return (
     <div>
       <SectionHeader icon={I.products} title="Products / Designs (Bill of Materials)" action={<Btn onClick={addProduct}><Icon>{I.plus}</Icon>Add Design</Btn>} />
@@ -515,6 +606,8 @@ function ProductsTab({ data, setData, refresh }) {
           const matCost = productMaterialCost(p, data.rawMaterials);
           const fullCost = matCost + (Number(p.laborCost) || 0);
           const margin = p.sellingPrice - fullCost;
+          const usedColorIds = p.colorStock.map((c) => c.colorId).filter(Boolean);
+          const availableColors = data.colors.filter((c) => !usedColorIds.includes(c.id));
           return (
             <div key={p.id} className="rounded-xl border border-stone-200 bg-white overflow-hidden">
               <div className="flex items-center justify-between p-3 bg-stone-50 cursor-pointer flex-wrap gap-2" onClick={() => setOpen(open === p.id ? null : p.id)}>
@@ -536,8 +629,28 @@ function ProductsTab({ data, setData, refresh }) {
                     <Input type="number" value={p.sellingPrice} onChange={(e) => updateProduct(p.id, "sellingPrice", e.target.value)} />
                     <label className="text-xs font-semibold text-stone-500 uppercase">Labor Cost / Unit</label>
                     <Input type="number" value={p.laborCost} onChange={(e) => updateProduct(p.id, "laborCost", e.target.value)} />
-                    <label className="text-xs font-semibold text-stone-500 uppercase">Current Stock (units)</label>
-                    <Input type="number" value={p.stock} onChange={(e) => updateProduct(p.id, "stock", e.target.value)} />
+
+                    <label className="text-xs font-semibold text-stone-500 uppercase block pt-2">Stock by Color</label>
+                    <table className="w-full">
+                      <tbody>
+                        {p.colorStock.map((cs) => (
+                          <tr key={cs.id} className="border-t border-stone-100">
+                            <Td className="pl-0">{colorName(data.colors, cs.colorId)}</Td>
+                            <Td className="w-24"><Input type="number" value={cs.stock} onChange={(e) => setColorStock(p.id, cs.colorId, e.target.value)} /></Td>
+                            <Td className="w-10 pr-0">
+                              {cs.colorId && <Btn variant="danger" onClick={() => removeColorVariant(cs.id)}><Icon>{I.trash}</Icon></Btn>}
+                            </Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {availableColors.length > 0 && (
+                      <div className="flex gap-2 items-center pt-1">
+                        <ColorSelect colors={availableColors} value={newColorId[p.id] || ""} onChange={(v) => setNewColorId((s) => ({ ...s, [p.id]: v }))} allowNone={false} className="flex-1" />
+                        <Btn variant="ghost" onClick={() => addColorVariant(p.id)}><Icon>{I.plus}</Icon>Add Color</Btn>
+                      </div>
+                    )}
+
                     <div className="text-sm text-stone-500 pt-2 border-t border-stone-100 mt-2">
                       Material cost/unit: <b className="font-mono">{fmtMoney(matCost)}</b><br/>
                       Total cost/unit: <b className="font-mono">{fmtMoney(fullCost)}</b><br/>
@@ -550,7 +663,7 @@ function ProductsTab({ data, setData, refresh }) {
                       <tbody>
                         {data.rawMaterials.map((r) => (
                           <tr key={r.id} className="border-t border-stone-100">
-                            <Td className="pl-0">{r.name} <span className="text-stone-400">({r.unit})</span></Td>
+                            <Td className="pl-0">{r.name} {r.colorId && <span className="text-stone-400">({colorName(data.colors, r.colorId)})</span>} <span className="text-stone-400">({r.unit})</span></Td>
                             <Td className="w-28 pr-0"><Input type="number" step="0.01" value={bomQty(p, r.id)} onChange={(e) => updateBom(p.id, r.id, e.target.value)} /></Td>
                           </tr>
                         ))}
@@ -571,7 +684,7 @@ function ProductsTab({ data, setData, refresh }) {
    PRODUCTION (WORKFLOW) TAB
    ============================================================ */
 function ProductionTab({ data, setData, refresh }) {
-  const [form, setForm] = useState({ date: today(), productId: data.products[0]?.id || "", qty: 1, stage: "Completed", notes: "" });
+  const [form, setForm] = useState({ date: today(), productId: data.products[0]?.id || "", colorId: null, qty: 1, stage: "Completed", notes: "" });
   const STAGES = ["Cutting", "Stitching", "Assembly", "Finishing", "QC & Packing", "Completed"];
   const product = data.products.find((p) => p.id === form.productId);
   const requirement = product ? product.bom.map((b) => {
@@ -590,10 +703,10 @@ function ProductionTab({ data, setData, refresh }) {
       for (const b of product.bom) {
         await db.adjustMaterialStock(b.materialId, -b.qty * qty);
       }
-      // increase finished stock
-      await db.adjustProductStock(product.id, qty);
+      // increase finished stock for the selected color
+      await db.adjustProductColorStock(product.id, form.colorId, qty);
     }
-    await db.insertProduction({ date: form.date, productId: product.id, qty, stage: form.stage, notes: form.notes, cost });
+    await db.insertProduction({ date: form.date, productId: product.id, colorId: form.colorId, qty, stage: form.stage, notes: form.notes, cost });
     setForm((f) => ({ ...f, qty: 1, notes: "" }));
     refresh();
   };
@@ -611,6 +724,8 @@ function ProductionTab({ data, setData, refresh }) {
           <Select value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })}>
             {data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </Select>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Color</label>
+          <ColorSelect colors={data.colors} value={form.colorId} onChange={(v) => setForm({ ...form, colorId: v })} />
           <label className="text-xs font-semibold text-stone-500 uppercase">Quantity (pairs)</label>
           <Input type="number" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} />
           <label className="text-xs font-semibold text-stone-500 uppercase">Stage</label>
@@ -635,20 +750,20 @@ function ProductionTab({ data, setData, refresh }) {
         </div>
         <div className="md:col-span-2 rounded-xl border border-stone-200 bg-white overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-stone-50"><tr><Th>Date</Th><Th>Design</Th><Th>Qty</Th><Th>Stage</Th><Th>Cost</Th><Th>Notes</Th><Th></Th></tr></thead>
+            <thead className="bg-stone-50"><tr><Th>Date</Th><Th>Design</Th><Th>Color</Th><Th>Qty</Th><Th>Stage</Th><Th>Cost</Th><Th>Notes</Th><Th></Th></tr></thead>
             <tbody>
               {data.production.map((p) => {
                 const prod = data.products.find((x) => x.id === p.productId);
                 return (
                   <tr key={p.id} className="border-t border-stone-100">
-                    <Td>{p.date}</Td><Td>{prod?.name || "—"}</Td><Td className="font-mono">{p.qty}</Td>
+                    <Td>{p.date}</Td><Td>{prod?.name || "—"}</Td><Td>{colorName(data.colors, p.colorId)}</Td><Td className="font-mono">{p.qty}</Td>
                     <Td><Tag tone={p.stage === "Completed" ? "good" : "warn"}>{p.stage}</Tag></Td>
                     <Td className="font-mono">{fmtMoney(p.cost)}</Td><Td className="text-stone-400">{p.notes}</Td>
                     <Td><Btn variant="danger" onClick={() => removeEntry(p.id)}><Icon>{I.trash}</Icon></Btn></Td>
                   </tr>
                 );
               })}
-              {data.production.length === 0 && <tr><Td colSpan={7} className="text-center text-stone-400 py-6">No production logged yet.</Td></tr>}
+              {data.production.length === 0 && <tr><Td colSpan={8} className="text-center text-stone-400 py-6">No production logged yet.</Td></tr>}
             </tbody>
           </table>
         </div>
@@ -725,7 +840,7 @@ function PurchasesTab({ data, setData, refresh }) {
    ============================================================ */
 function SalesTab({ data, setData, refresh }) {
   const firstProduct = data.products[0];
-  const [form, setForm] = useState({ date: today(), clientId: data.clients[0]?.id || "", productId: firstProduct?.id || "", qty: 1, rate: firstProduct?.sellingPrice || 0 });
+  const [form, setForm] = useState({ date: today(), clientId: data.clients[0]?.id || "", productId: firstProduct?.id || "", colorId: null, qty: 1, rate: firstProduct?.sellingPrice || 0 });
   useEffect(() => {
     const p = data.products.find((x) => x.id === form.productId);
     if (p) setForm((f) => ({ ...f, rate: p.sellingPrice }));
@@ -735,13 +850,15 @@ function SalesTab({ data, setData, refresh }) {
     const p = data.products.find((x) => x.id === form.productId);
     if (!p || !form.clientId || Number(form.qty) <= 0) return;
     const qty = Number(form.qty);
-    await db.adjustProductStock(p.id, -qty);
-    await db.insertSale({ date: form.date, clientId: form.clientId, productId: p.id, qty, rate: Number(form.rate) });
+    await db.adjustProductColorStock(p.id, form.colorId, -qty);
+    await db.insertSale({ date: form.date, clientId: form.clientId, productId: p.id, colorId: form.colorId, qty, rate: Number(form.rate) });
     setForm((f) => ({ ...f, qty: 1 }));
     refresh();
   };
   const removeEntry = async (id) => { await db.deleteSale(id); refresh(); };
   const product = data.products.find((p) => p.id === form.productId);
+  const colorStockEntry = product?.colorStock.find((cs) => (cs.colorId === form.colorId) || (!cs.colorId && !form.colorId));
+  const availableStock = colorStockEntry ? colorStockEntry.stock : 0;
 
   return (
     <div>
@@ -756,22 +873,24 @@ function SalesTab({ data, setData, refresh }) {
             {data.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
           <label className="text-xs font-semibold text-stone-500 uppercase">Design</label>
-          <Select value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })}>
+          <Select value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value, colorId: null })}>
             {data.products.map((p) => <option key={p.id} value={p.id}>{p.name} (stock: {p.stock})</option>)}
           </Select>
+          <label className="text-xs font-semibold text-stone-500 uppercase">Color</label>
+          <ColorSelect colors={data.colors} value={form.colorId} onChange={(v) => setForm({ ...form, colorId: v })} />
           <label className="text-xs font-semibold text-stone-500 uppercase">Quantity (pairs)</label>
           <Input type="number" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} />
           <label className="text-xs font-semibold text-stone-500 uppercase">Rate per Unit (₹)</label>
           <Input type="number" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} />
-          {product && Number(form.qty) > product.stock && (
-            <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2">Only {product.stock} in stock.</div>
+          {product && Number(form.qty) > availableStock && (
+            <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2">Only {availableStock} in stock for {colorName(data.colors, form.colorId)}.</div>
           )}
           <div className="text-sm text-stone-500">Total: <b className="font-mono">{fmtMoney((form.qty || 0) * (form.rate || 0))}</b></div>
           <Btn onClick={submit} className="w-full justify-center"><Icon>{I.save}</Icon>Save Sale</Btn>
         </div>
         <div className="md:col-span-2 rounded-xl border border-stone-200 bg-white overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-stone-50"><tr><Th>Date</Th><Th>Client</Th><Th>Design</Th><Th>Qty</Th><Th>Rate</Th><Th>Total</Th><Th>Profit</Th><Th></Th></tr></thead>
+            <thead className="bg-stone-50"><tr><Th>Date</Th><Th>Client</Th><Th>Design</Th><Th>Color</Th><Th>Qty</Th><Th>Rate</Th><Th>Total</Th><Th>Profit</Th><Th></Th></tr></thead>
             <tbody>
               {data.sales.map((s) => {
                 const c = data.clients.find((x) => x.id === s.clientId);
@@ -780,7 +899,7 @@ function SalesTab({ data, setData, refresh }) {
                 const profit = (s.rate - cost) * s.qty;
                 return (
                   <tr key={s.id} className="border-t border-stone-100">
-                    <Td>{s.date}</Td><Td>{c?.name || "—"}</Td><Td>{p?.name || "—"}</Td>
+                    <Td>{s.date}</Td><Td>{c?.name || "—"}</Td><Td>{p?.name || "—"}</Td><Td>{colorName(data.colors, s.colorId)}</Td>
                     <Td className="font-mono">{s.qty}</Td><Td className="font-mono">{fmtMoney(s.rate)}</Td>
                     <Td className="font-mono">{fmtMoney(s.qty * s.rate)}</Td>
                     <Td className={`font-mono ${profit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{fmtMoney(profit)}</Td>
@@ -788,7 +907,7 @@ function SalesTab({ data, setData, refresh }) {
                   </tr>
                 );
               })}
-              {data.sales.length === 0 && <tr><Td colSpan={8} className="text-center text-stone-400 py-6">No sales logged yet.</Td></tr>}
+              {data.sales.length === 0 && <tr><Td colSpan={9} className="text-center text-stone-400 py-6">No sales logged yet.</Td></tr>}
             </tbody>
           </table>
         </div>
@@ -1145,6 +1264,19 @@ function SettingsTab({ data, setData, refresh }) {
     });
   };
 
+  const updateColor = (id, field, value) => {
+    setData((d) => ({ ...d, colors: d.colors.map((c) => c.id === id ? { ...c, [field]: field === "name" || field === "hex" ? value : Number(value) } : c) }));
+    debounce("color-" + id, () => {
+      setData((d) => {
+        const row = d.colors.find((c) => c.id === id);
+        if (row) db.upsertColor(row);
+        return d;
+      });
+    });
+  };
+  const addColor = async () => { await db.insertColor(); refresh(); };
+  const removeColor = async (id) => { await db.deleteColor(id); refresh(); };
+
   const exportData = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1156,7 +1288,7 @@ function SettingsTab({ data, setData, refresh }) {
   };
 
   return (
-    <div>
+    <div className="space-y-5">
       <SectionHeader icon={I.settings} title="Settings" />
       <div className="rounded-xl border border-stone-200 bg-white p-4 space-y-3 max-w-md">
         <label className="text-xs font-semibold text-stone-500 uppercase">Business Name</label>
@@ -1173,6 +1305,26 @@ function SettingsTab({ data, setData, refresh }) {
             <Btn variant="ghost" onClick={refresh}>Refresh Data</Btn>
           </div>
         </div>
+      </div>
+
+      <div>
+        <SectionHeader icon={I.products} title="Colors" action={<Btn onClick={addColor}><Icon>{I.plus}</Icon>Add Color</Btn>} />
+        <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
+          <table className="w-full max-w-md">
+            <thead className="bg-stone-50"><tr><Th>Color</Th><Th>Name</Th><Th>Swatch</Th><Th></Th></tr></thead>
+            <tbody>
+              {data.colors.map((c) => (
+                <tr key={c.id} className="border-t border-stone-100">
+                  <Td><ColorDot hex={c.hex} /></Td>
+                  <Td><Input value={c.name} onChange={(e) => updateColor(c.id, "name", e.target.value)} /></Td>
+                  <Td><Input type="color" value={c.hex} onChange={(e) => updateColor(c.id, "hex", e.target.value)} className="h-8 p-0.5 w-16" /></Td>
+                  <Td><Btn variant="danger" onClick={() => removeColor(c.id)}><Icon>{I.trash}</Icon></Btn></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-stone-400 mt-2">These colors appear as options when adding raw materials, logging production, and recording sales. Removing a color here won't remove it from past records, but it will no longer be selectable.</p>
       </div>
     </div>
   );
