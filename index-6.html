@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Isfahan Traders</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#fafaf9;color:#1c1917}
+input,select,button{font-family:inherit;font-size:13px}
+.header{background:#92400e;color:#fff;padding:12px 16px;position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:10px}
+.logo{width:34px;height:34px;border-radius:50%;background:#b45309;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;color:#fff;flex-shrink:0}
+.biz{font-weight:800;font-size:15px}.sub{font-size:11px;opacity:.7}
+.nav{background:#fff;border-bottom:1px solid #e7e5e4;overflow-x:auto;position:sticky;top:58px;z-index:99}
+.nav-inner{display:flex;gap:2px;padding:8px 12px;min-width:max-content}
+.nav button{padding:5px 11px;border-radius:20px;border:none;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:#78716c;white-space:nowrap}
+.nav button.active{background:#b45309;color:#fff}
+.content{max-width:1000px;margin:0 auto;padding:16px}
+.card{background:#fff;border:1px solid #e7e5e4;border-radius:10px;padding:14px;margin-bottom:14px}
+.card h3{font-size:15px;font-weight:700;margin-bottom:12px;color:#92400e}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:10px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px}
+label{display:block;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#78716c;margin-bottom:3px}
+input,select{width:100%;padding:7px 9px;border:1px solid #e7e5e4;border-radius:7px;outline:none;background:#fff}
+.btn{background:#b45309;color:#fff;border:none;border-radius:7px;padding:8px 14px;font-weight:600;cursor:pointer;font-size:13px}
+.btn-del{background:#fff1f2;color:#dc2626;border:1px solid #fecdd3;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;color:#78716c;padding:7px 10px;background:#fafaf9;border-bottom:1px solid #e7e5e4}
+td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f5f5f4}
+.tbl-wrap{border:1px solid #e7e5e4;border-radius:10px;overflow:hidden;overflow-x:auto}
+.tag{background:#f5f5f4;border:1px solid #e7e5e4;border-radius:99px;padding:2px 7px;font-size:10px;font-weight:600;color:#78716c;white-space:nowrap}
+.mono{font-family:monospace}
+.green{color:#059669}.red{color:#dc2626}.amber{color:#d97706}
+.bold{font-weight:700}
+.stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px}
+.stat{padding:12px;border-radius:10px;border:1px solid #e7e5e4;background:#fff}
+.stat.g{border-color:#a7f3d0;background:#f0fdf4}
+.stat.r{border-color:#fecaca;background:#fff5f5}
+.stat-title{font-size:10px;font-weight:700;text-transform:uppercase;color:#78716c}
+.stat-val{font-size:20px;font-weight:800;font-family:monospace;margin-top:3px}
+.stat-sub{font-size:10px;color:#78716c;margin-top:2px}
+.toast{position:fixed;bottom:16px;right:16px;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;color:#fff;z-index:999;display:none}
+.empty{text-align:center;padding:28px;color:#78716c;font-size:13px}
+.worker-btn{padding:6px 13px;border-radius:20px;border:1px solid #e7e5e4;background:#fff;font-size:13px;font-weight:600;cursor:pointer;margin:3px}
+.worker-btn.active{background:#b45309;color:#fff}
+.period-btn{padding:4px 9px;border-radius:14px;border:1px solid #e7e5e4;background:#fff;font-size:11px;font-weight:600;cursor:pointer;margin:2px}
+.period-btn.active{background:#b45309;color:#fff}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">IT</div>
+  <div><div class="biz" id="biz-name">Isfahan Traders</div><div class="sub">Shoe Upper Ledger · Live sync</div></div>
+</div>
+<div class="nav"><div class="nav-inner" id="nav"></div></div>
+<div class="content" id="content"><div class="empty">Loading…</div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const SB="https://qljqfiyamrmrxvcrwopy.supabase.co";
+const SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFsanFmaXlhbXJtcnh2Y3J3b3B5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5NzY5NTcsImV4cCI6MjA5NzU1Mjk1N30.smMb5JbjU5qVg8c0lXIeRcNCJMc8vWjiZVEuNIAXzy0";
+
+// Supabase REST API calls without SDK
+async function sbGet(table,order){
+  const url=SB+"/rest/v1/"+table+"?select=*"+(order?"&order="+order:"");
+  const r=await fetch(url,{headers:{"apikey":SK,"Authorization":"Bearer "+SK}});
+  return r.json();
+}
+async function sbPost(table,data){
+  const r=await fetch(SB+"/rest/v1/"+table,{method:"POST",headers:{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json","Prefer":"return=representation"},body:JSON.stringify(data)});
+  if(!r.ok)throw new Error(await r.text());
+  return r.json();
+}
+async function sbPatch(table,id,data){
+  const r=await fetch(SB+"/rest/v1/"+table+"?id=eq."+id,{method:"PATCH",headers:{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"},body:JSON.stringify(data)});
+  if(!r.ok)throw new Error(await r.text());
+}
+async function sbDel(table,id){
+  const r=await fetch(SB+"/rest/v1/"+table+"?id=eq."+id,{method:"DELETE",headers:{"apikey":SK,"Authorization":"Bearer "+SK}});
+  if(!r.ok)throw new Error(await r.text());
+}
+
+const fmt=n=>"Rs."+(+(n||0)).toLocaleString("en-IN",{maximumFractionDigits:0});
+const today=()=>new Date().toISOString().slice(0,10);
+const daysAgo=s=>{const d=new Date(s+"T00:00:00"),n=new Date();n.setHours(0,0,0,0);return Math.round((n-d)/86400000)};
+const inRange=(s,d)=>{const x=daysAgo(s);return x>=0&&x<=d};
+const num=(n,d=2)=>{const v=+(n||0);return v%1===0?v:v.toFixed(d)};
+
+let D={};
+let curTab="Dashboard";
+
+function toast(msg,err){
+  const t=document.getElementById("toast");
+  t.textContent=msg;t.style.background=err?"#dc2626":"#059669";t.style.display="block";
+  setTimeout(()=>t.style.display="none",2500);
+}
+
+async function loadAll(){
+  const tables=["settings","categories","raw_materials","suppliers","purchases","products","labor","material_issued","production","advances","customers","sales","payments","supplier_payments","expenses"];
+  try{
+    const res=await Promise.all(tables.map(t=>sbGet(t,"id")));
+    tables.forEach((t,i)=>D[t]=res[i]||[]);
+    D.settings=D.settings[0]||{business_name:"Isfahan Traders",cash_in_hand:0};
+    document.getElementById("biz-name").textContent=D.settings.business_name||"Isfahan Traders";
+  }catch(e){toast("Load error: "+e.message,true);}
+}
+
+async function save(fn){
+  try{await fn();toast("Saved ✓");await loadAll();render();}
+  catch(e){toast(e.message,true);}
+}
+
+const TABS=["Dashboard","Raw Materials","Products","Labor","Material Issued","Production","Advances","Labor Ledger","Purchases","Suppliers","Customers","Sales","Payments","Supplier Payments","Expenses","Reports","Settings"];
+
+function initNav(){
+  const nav=document.getElementById("nav");
+  nav.innerHTML=TABS.map(t=>`<button onclick="switchTab('${t}')" id="nb-${t.replace(/ /g,'_')}">${t}</button>`).join("");
+  document.getElementById("nb-Dashboard").classList.add("active");
+}
+
+function switchTab(t){
+  curTab=t;
+  TABS.forEach(x=>document.getElementById("nb-"+x.replace(/ /g,'_')).classList.remove("active"));
+  document.getElementById("nb-"+t.replace(/ /g,'_')).classList.add("active");
+  render();
+}
+
+function render(){
+  const c=document.getElementById("content");
+  if(curTab==="Dashboard")c.innerHTML=renderDash();
+  else if(curTab==="Raw Materials")c.innerHTML=renderRM();
+  else if(curTab==="Products")c.innerHTML=renderProducts();
+  else if(curTab==="Labor")c.innerHTML=renderLabor();
+  else if(curTab==="Material Issued")c.innerHTML=renderMatIssued();
+  else if(curTab==="Production")c.innerHTML=renderProduction();
+  else if(curTab==="Advances")c.innerHTML=renderAdvances();
+  else if(curTab==="Labor Ledger")c.innerHTML=renderLedger();
+  else if(curTab==="Purchases")c.innerHTML=renderPurchases();
+  else if(curTab==="Suppliers")c.innerHTML=renderSuppliers();
+  else if(curTab==="Customers")c.innerHTML=renderCustomers();
+  else if(curTab==="Sales")c.innerHTML=renderSales();
+  else if(curTab==="Payments")c.innerHTML=renderPayments();
+  else if(curTab==="Supplier Payments")c.innerHTML=renderSPay();
+  else if(curTab==="Expenses")c.innerHTML=renderExpenses();
+  else if(curTab==="Reports")c.innerHTML=renderReports();
+  else if(curTab==="Settings")c.innerHTML=renderSettings();
+}
+
+// ─── DASHBOARD ───
+function renderDash(){
+  const rev=(D.sales||[]).filter(r=>inRange(r.date,29)).reduce((s,r)=>s++(r.net_total||0),0);
+  const rawVal=(D.raw_materials||[]).reduce((s,r)=>s++(r.opening_stock||0)*+(r.cost_per_unit||0),0);
+  const custBal=(D.customers||[]).reduce((s,c)=>{
+    const sold=(D.sales||[]).filter(r=>r.customer_id===c.id).reduce((a,r)=>a++(r.net_total||0),0);
+    const paid=(D.payments||[]).filter(r=>r.customer_id===c.id).reduce((a,r)=>a++(r.amount||0),0);
+    return s++(c.opening_balance||0)+sold-paid;
+  },0);
+  const suppBal=(D.suppliers||[]).reduce((s,sup)=>{
+    const b=(D.purchases||[]).filter(r=>r.supplier_id===sup.id).reduce((a,r)=>a++(r.total_value||0),0);
+    const p=(D.supplier_payments||[]).filter(r=>r.supplier_id===sup.id).reduce((a,r)=>a++(r.amount||0),0);
+    return s++(sup.opening_balance||0)+b-p;
+  },0);
+  const nwc=rawVal+custBal-suppBal++(D.settings.cash_in_hand||0);
+  const prods=(D.products||[]).map(p=>{
+    const produced=(D.production||[]).filter(r=>r.product_id===p.id).reduce((s,r)=>s++(r.quantity||0),0);
+    const sold=(D.sales||[]).filter(r=>r.product_id===p.id).reduce((s,r)=>s++(r.quantity||0),0);
+    const stock=+(p.opening_stock||0)+produced-sold;
+    return `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f5f5f4;font-size:12px"><span>${p.name} <span class="tag">${p.color}</span></span><span class="mono ${stock<=0?'red':''}">${stock} doz</span></div>`;
+  }).join("")||"<div style='color:#78716c;font-size:12px'>No products yet.</div>";
+  const mats=(D.raw_materials||[]).filter(r=>+(r.opening_stock||0)>0).slice(0,8).map(r=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f5f5f4;font-size:12px"><span>${r.display_name}</span><span class="mono">${r.opening_stock} ${r.unit}</span></div>`).join("")||"<div style='color:#78716c;font-size:12px'>No stock yet.</div>";
+  return `<div class="stat-grid">
+    <div class="stat"><div class="stat-title">Revenue (30d)</div><div class="stat-val">${fmt(rev)}</div><div class="stat-sub">${(D.sales||[]).filter(r=>inRange(r.date,29)).length} sales</div></div>
+    <div class="stat ${custBal>0?'g':''}"><div class="stat-title">Customer Receivable</div><div class="stat-val ${custBal>0?'green':''}">${fmt(custBal)}</div></div>
+    <div class="stat ${suppBal>0?'r':''}"><div class="stat-title">Supplier Payable</div><div class="stat-val ${suppBal>0?'red':''}">${fmt(suppBal)}</div></div>
+    <div class="stat ${nwc>0?'g':'r'}"><div class="stat-title">Net Working Capital</div><div class="stat-val ${nwc>0?'green':'red'}">${fmt(nwc)}</div><div class="stat-sub">Stock+Recv-Pay+Cash</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="card"><h3>Raw Material Stock</h3>${mats}</div>
+    <div class="card"><h3>Products in Stock</h3>${prods}</div>
+  </div>`;
+}
+
+// ─── RAW MATERIALS ───
+function renderRM(){
+  const rows=(D.raw_materials||[]).map(r=>`<tr>
+    <td>${r.material_name}</td><td><span class="tag">${r.color}</span></td><td>${r.unit}</td>
+    <td><input type="number" value="${r.opening_stock||0}" style="width:80px" onblur="updRM(${r.id},'opening_stock',this.value)"></td>
+    <td><input type="number" value="${r.cost_per_unit||0}" style="width:80px" onblur="updRM(${r.id},'cost_per_unit',this.value)"></td>
+    <td class="mono">${fmt(+(r.opening_stock||0)*+(r.cost_per_unit||0))}</td>
+    <td><button class="btn-del" onclick="delRM(${r.id})">X</button></td>
+  </tr>`).join("");
+  const colorOpts=["Black","Green","Brown","Mustard","Cream","Maroon","Pink","Zink","Purple","Grey","No Color"].map(c=>`<option>${c}</option>`).join("");
+  return `<div class="card"><h3>Add Material</h3>
+    <div class="grid3">
+      <div><label>Name</label><input id="rm-name" value="Ragzine"></div>
+      <div><label>Color</label><select id="rm-color">${colorOpts}</select></div>
+      <div><label>Unit</label><input id="rm-unit" value="meter"></div>
+      <div><label>Opening Stock</label><input type="number" id="rm-os" value="0"></div>
+      <div><label>Cost/Unit (Rs.)</label><input type="number" id="rm-cu" value="0"></div>
+      <div><label>Reorder Level</label><input type="number" id="rm-rl" value="30"></div>
+    </div>
+    <button class="btn" onclick="addRM()">+ Add Material</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Color</th><th>Unit</th><th>Opening Stock</th><th>Cost/Unit</th><th>Stock Value</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty">No materials yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addRM=()=>save(async()=>{
+  const n=document.getElementById("rm-name").value;
+  const co=document.getElementById("rm-color").value;
+  if(!n)throw new Error("Name required");
+  const dn=co==="No Color"?n:n+" - "+co;
+  await sbPost("raw_materials",{material_name:n,color:co,display_name:dn,unit:document.getElementById("rm-unit").value,opening_stock:+document.getElementById("rm-os").value,cost_per_unit:+document.getElementById("rm-cu").value,reorder_level:+document.getElementById("rm-rl").value});
+});
+window.updRM=(id,f,v)=>save(async()=>sbPatch("raw_materials",id,{[f]:+v}));
+window.delRM=id=>save(async()=>sbDel("raw_materials",id));
+
+// ─── PRODUCTS ───
+function renderProducts(){
+  const catOpts=(D.categories||[]).map(c=>`<option>${c.name}</option>`).join("");
+  const colorOpts=["Black","Green","Brown","Mustard","Cream","Maroon","Pink","Zink","Purple","Grey"].map(c=>`<option>${c}</option>`).join("");
+  const stock=p=>+(p.opening_stock||0)+(D.production||[]).filter(r=>r.product_id===p.id).reduce((s,r)=>s++(r.quantity||0),0)-(D.sales||[]).filter(r=>r.product_id===p.id).reduce((s,r)=>s++(r.quantity||0),0);
+  const rows=(D.products||[]).map(p=>`<tr>
+    <td>${p.name}</td><td><span class="tag">${p.category}</span></td><td><span class="tag">${p.color}</span></td>
+    <td><input type="number" value="${p.selling_price||0}" style="width:90px" onblur="updProd(${p.id},'selling_price',this.value)"></td>
+    <td><input type="number" value="${p.opening_stock||0}" style="width:70px" onblur="updProd(${p.id},'opening_stock',this.value)"></td>
+    <td class="mono bold ${stock(p)<=0?'red':''}">${stock(p)}</td>
+    <td><button class="btn-del" onclick="delProd(${p.id})">X</button></td>
+  </tr>`).join("");
+  return `<div class="card"><h3>Add Product</h3>
+    <div class="grid3">
+      <div><label>Name (e.g. 01)</label><input id="p-name" value="01"></div>
+      <div><label>Category</label><select id="p-cat">${catOpts}</select></div>
+      <div><label>Color</label><select id="p-color">${colorOpts}</select></div>
+      <div><label>Selling Price (Rs.)</label><input type="number" id="p-price" value="0"></div>
+      <div><label>Opening Stock</label><input type="number" id="p-os" value="0"></div>
+    </div>
+    <button class="btn" onclick="addProd()">+ Add Product</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Color</th><th>Selling Price</th><th>Opening</th><th>Stock</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty">No products yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addProd=()=>save(async()=>{
+  const n=document.getElementById("p-name").value;
+  if(!n)throw new Error("Name required");
+  await sbPost("products",{name:n,category:document.getElementById("p-cat").value,color:document.getElementById("p-color").value,selling_price:+document.getElementById("p-price").value,opening_stock:+document.getElementById("p-os").value});
+});
+window.updProd=(id,f,v)=>save(async()=>sbPatch("products",id,{[f]:+v}));
+window.delProd=id=>save(async()=>sbDel("products",id));
+
+// ─── LABOR ───
+function renderLabor(){
+  const rows=(D.labor||[]).map(l=>`<tr>
+    <td>${l.name}</td><td>${l.phone||""}</td>
+    <td><input type="number" value="${l.adult_wage_per_pc||0}" style="width:70px" onblur="updLabor(${l.id},'adult_wage_per_pc',this.value)"></td>
+    <td><input type="number" value="${l.kids_wage_per_pc||0}" style="width:70px" onblur="updLabor(${l.id},'kids_wage_per_pc',this.value)"></td>
+    <td><input type="number" value="${l.opening_balance_payable||0}" style="width:90px" onblur="updLabor(${l.id},'opening_balance_payable',this.value)"></td>
+    <td><button class="btn-del" onclick="delLabor(${l.id})">X</button></td>
+  </tr>`).join("");
+  return `<div class="card"><h3>Add Worker</h3>
+    <div class="grid3">
+      <div><label>Name</label><input id="l-name"></div>
+      <div><label>Phone</label><input id="l-phone"></div>
+      <div><label>Adult Wage/pc</label><input type="number" id="l-aw" value="30"></div>
+      <div><label>Kids Wage/pc</label><input type="number" id="l-kw" value="20"></div>
+      <div><label>Opening Balance (Rs.)</label><input type="number" id="l-ob" value="0"></div>
+    </div>
+    <button class="btn" onclick="addLabor()">+ Add Worker</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Adult/pc</th><th>Kids/pc</th><th>Opening Bal</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="empty">No workers yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addLabor=()=>save(async()=>{
+  const n=document.getElementById("l-name").value;
+  if(!n)throw new Error("Name required");
+  await sbPost("labor",{name:n,phone:document.getElementById("l-phone").value,adult_wage_per_pc:+document.getElementById("l-aw").value,kids_wage_per_pc:+document.getElementById("l-kw").value,opening_balance_payable:+document.getElementById("l-ob").value});
+});
+window.updLabor=(id,f,v)=>save(async()=>sbPatch("labor",id,{[f]:+v}));
+window.delLabor=id=>save(async()=>sbDel("labor",id));
+
+// ─── MATERIAL ISSUED ───
+function renderMatIssued(){
+  const laborOpts=(D.labor||[]).map(l=>`<option value="${l.id}">${l.name}</option>`).join("");
+  const matOpts=(D.raw_materials||[]).map(r=>`<option value="${r.id}">${r.display_name}</option>`).join("");
+  const rows=[...(D.material_issued||[])].reverse().map(r=>{
+    const l=(D.labor||[]).find(x=>x.id===r.labor_id)||{};
+    const m=(D.raw_materials||[]).find(x=>x.id===r.material_id)||{};
+    return `<tr><td>${r.date}</td><td>${l.name||"?"}</td><td>${m.display_name||"?"}</td><td class="mono">${r.quantity}</td><td><button class="btn-del" onclick="delMI('${r.id}')">X</button></td></tr>`;
+  }).join("");
+  return `<div class="card"><h3>Issue Material to Worker</h3>
+    <div class="grid">
+      <div><label>Date</label><input type="date" id="mi-date" value="${today()}"></div>
+      <div><label>Worker</label><select id="mi-labor"><option value="">-- pick --</option>${laborOpts}</select></div>
+      <div><label>Material</label><select id="mi-mat"><option value="">-- pick --</option>${matOpts}</select></div>
+      <div><label>Quantity</label><input type="number" id="mi-qty" value="0"></div>
+    </div>
+    <button class="btn" onclick="addMI()">+ Issue</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Worker</th><th>Material</th><th>Qty</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="empty">None yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addMI=()=>save(async()=>{
+  const l=document.getElementById("mi-labor").value;
+  const m=document.getElementById("mi-mat").value;
+  if(!l||!m)throw new Error("Pick worker and material");
+  await sbPost("material_issued",{date:document.getElementById("mi-date").value,labor_id:+l,material_id:+m,quantity:+document.getElementById("mi-qty").value});
+});
+window.delMI=id=>save(async()=>sbDel("material_issued",id));
+
+// ─── PRODUCTION ───
+function renderProduction(){
+  const laborOpts=(D.labor||[]).map(l=>`<option value="${l.id}">${l.name}</option>`).join("");
+  const prodOpts=(D.products||[]).map(p=>`<option value="${p.id}">${p.name} (${p.category} - ${p.color})</option>`).join("");
+  const rows=[...(D.production||[])].reverse().map(r=>{
+    const l=(D.labor||[]).find(x=>x.id===r.labor_id)||{};
+    const p=(D.products||[]).find(x=>x.id===r.product_id)||{};
+    return `<tr><td>${r.date}</td><td>${l.name||"?"}</td><td>${p.name||"?"} <span class="tag">${p.color||""}</span></td><td class="mono">${r.quantity}</td><td class="mono green">${fmt(r.wage_earned)}</td><td class="mono">${num(r.ragzine_used)}</td><td class="mono">${num(r.mash_used)}</td><td class="mono">${num(r.daimod_used)}</td><td><button class="btn-del" onclick="delProd2('${r.id}')">X</button></td></tr>`;
+  }).join("");
+  return `<div class="card"><h3>Log Production</h3>
+    <div class="grid">
+      <div><label>Date</label><input type="date" id="pr-date" value="${today()}"></div>
+      <div><label>Worker</label><select id="pr-labor"><option value="">-- pick --</option>${laborOpts}</select></div>
+      <div><label>Product</label><select id="pr-prod"><option value="">-- pick --</option>${prodOpts}</select></div>
+      <div><label>Quantity (dozens)</label><input type="number" id="pr-qty" value="0"></div>
+    </div>
+    <button class="btn" onclick="addProduction()">+ Log Production</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Worker</th><th>Product</th><th>Qty</th><th>Wage</th><th>Ragzine</th><th>Mash</th><th>Daimod</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="9" class="empty">None yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addProduction=()=>save(async()=>{
+  const lid=document.getElementById("pr-labor").value;
+  const pid=document.getElementById("pr-prod").value;
+  const qty=+document.getElementById("pr-qty").value;
+  if(!lid||!pid||!qty)throw new Error("Fill all fields");
+  const prod=(D.products||[]).find(p=>p.id===+pid)||{};
+  const worker=(D.labor||[]).find(l=>l.id===+lid)||{};
+  const cat=(D.categories||[]).find(c=>c.name===prod.category)||{};
+  const isAdult=prod.category==="Adult";
+  const wage=qty*(isAdult?+(worker.adult_wage_per_pc||0):+(worker.kids_wage_per_pc||0));
+  await sbPost("production",{date:document.getElementById("pr-date").value,labor_id:+lid,product_id:+pid,quantity:qty,wage_earned:wage,ragzine_used:qty*+(cat.ragzine_per_pc||0),mash_used:qty*+(cat.mash_per_pc||0),daimod_used:qty*+(cat.daimod_per_pc||0),naki_feeta_used:qty*+(cat.naki_feeta_per_pc||0),pipe_used:qty*+(cat.pipe_per_pc||0)});
+});
+window.delProd2=id=>save(async()=>sbDel("production",id));
+
+// ─── ADVANCES ───
+function renderAdvances(){
+  const laborOpts=(D.labor||[]).map(l=>`<option value="${l.id}">${l.name}</option>`).join("");
+  const rows=[...(D.advances||[])].reverse().map(r=>{
+    const l=(D.labor||[]).find(x=>x.id===r.labor_id)||{};
+    return `<tr><td>${r.date}</td><td>${l.name||"?"}</td><td class="mono">${fmt(r.amount)}</td><td>${r.note||""}</td><td><button class="btn-del" onclick="delAdv('${r.id}')">X</button></td></tr>`;
+  }).join("");
+  return `<div class="card"><h3>Add Advance</h3>
+    <div class="grid">
+      <div><label>Date</label><input type="date" id="adv-date" value="${today()}"></div>
+      <div><label>Worker</label><select id="adv-labor"><option value="">-- pick --</option>${laborOpts}</select></div>
+      <div><label>Amount (Rs.)</label><input type="number" id="adv-amt" value="0"></div>
+      <div><label>Note</label><input id="adv-note"></div>
+    </div>
+    <button class="btn" onclick="addAdv()">+ Add Advance</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Worker</th><th>Amount</th><th>Note</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="empty">None yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addAdv=()=>save(async()=>{
+  const l=document.getElementById("adv-labor").value;
+  if(!l)throw new Error("Pick worker");
+  await sbPost("advances",{date:document.getElementById("adv-date").value,labor_id:+l,amount:+document.getElementById("adv-amt").value,note:document.getElementById("adv-note").value});
+});
+window.delAdv=id=>save(async()=>sbDel("advances",id));
+
+// ─── LABOR LEDGER ───
+let selWorker=null;
+function renderLedger(){
+  const btns=(D.labor||[]).map(l=>`<button class="worker-btn ${selWorker===l.id?'active':''}" onclick="selW(${l.id})">${l.name}</button>`).join("");
+  if(!selWorker||(D.labor||[]).length===0) return `<div class="card"><h3>Labor Ledger</h3><div>${btns||"No workers yet."}</div><div class="empty">Select a worker above.</div></div>`;
+  const worker=(D.labor||[]).find(l=>l.id===selWorker)||{};
+  const wProd=(D.production||[]).filter(r=>r.labor_id===selWorker);
+  const wAdv=(D.advances||[]).filter(r=>r.labor_id===selWorker);
+  const wIssued=(D.material_issued||[]).filter(r=>r.labor_id===selWorker);
+  const totalWage=+(worker.opening_balance_payable||0)+wProd.reduce((s,r)=>s++(r.wage_earned||0),0);
+  const totalAdv=wAdv.reduce((s,r)=>s++(r.amount||0),0);
+  const net=totalWage-totalAdv;
+  const matBal=(D.raw_materials||[]).map(rm=>{
+    const issued=wIssued.filter(r=>r.material_id===rm.id).reduce((s,r)=>s++(r.quantity||0),0);
+    let consumed=0;
+    wProd.forEach(pr=>{
+      const pp=(D.products||[]).find(p=>p.id===pr.product_id)||{};
+      if(rm.material_name==="Ragzine"&&pp.color===rm.color)consumed+=+(pr.ragzine_used||0);
+      if(rm.material_name==="Mash"&&pp.color===rm.color)consumed+=+(pr.mash_used||0);
+      if(rm.material_name==="Daimod")consumed+=+(pr.daimod_used||0);
+      if(rm.material_name==="Naki Feeta")consumed+=+(pr.naki_feeta_used||0);
+      if(rm.material_name==="Pipe")consumed+=+(pr.pipe_used||0);
+    });
+    return {...rm,issued,consumed,balance:issued-consumed};
+  }).filter(r=>r.issued>0||r.balance!==0);
+  const matRows=matBal.map(r=>`<tr><td>${r.material_name}</td><td><span class="tag">${r.color}</span></td><td class="mono">${num(r.issued)}</td><td class="mono">${num(r.consumed)}</td><td class="mono bold ${r.balance<0?'red':'green'}">${num(r.balance)}</td></tr>`).join("");
+  const prodRows=wProd.slice().reverse().map(r=>{const p=(D.products||[]).find(x=>x.id===r.product_id)||{};return`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid #f5f5f4"><span>${r.date} - ${p.name||"?"} ${p.color||""}</span><span class="mono">${r.quantity}doz / ${fmt(r.wage_earned)}</span></div>`;}).join("")||"<div style='color:#78716c;font-size:12px'>None.</div>";
+  const advRows=wAdv.slice().reverse().map(r=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid #f5f5f4"><span>${r.date}${r.note?" - "+r.note:""}</span><span class="mono red">${fmt(r.amount)}</span></div>`).join("")||"<div style='color:#78716c;font-size:12px'>None.</div>";
+  return `<div class="card"><h3>Labor Ledger</h3><div style="margin-bottom:12px">${btns}</div>
+    <div class="stat-grid">
+      <div class="stat g"><div class="stat-title">Wage Earned</div><div class="stat-val green">${fmt(totalWage)}</div></div>
+      <div class="stat ${totalAdv>0?'r':''}"><div class="stat-title">Advances</div><div class="stat-val ${totalAdv>0?'red':''}">${fmt(totalAdv)}</div></div>
+      <div class="stat ${net>0?'g':'r'}"><div class="stat-title">Net Payable</div><div class="stat-val ${net>0?'green':'red'}">${fmt(net)}</div></div>
+    </div>
+    <div class="card" style="margin-bottom:12px"><div style="font-weight:700;margin-bottom:8px">Material in Hand</div>
+      ${matBal.length?`<div class="tbl-wrap"><table><thead><tr><th>Material</th><th>Color</th><th>Issued</th><th>Consumed</th><th>Balance</th></tr></thead><tbody>${matRows}</tbody></table></div>`:"<div style='color:#78716c;font-size:12px'>No material issued yet.</div>"}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="card"><div style="font-weight:700;margin-bottom:8px">Production</div>${prodRows}</div>
+      <div class="card"><div style="font-weight:700;margin-bottom:8px">Advances</div>${advRows}</div>
+    </div>
+  </div>`;
+}
+window.selW=id=>{selWorker=selWorker===id?null:id;render()};
+
+// ─── PURCHASES ───
+function renderPurchases(){
+  const suppOpts=(D.suppliers||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join("");
+  const matOpts=(D.raw_materials||[]).map(r=>`<option value="${r.id}">${r.display_name}</option>`).join("");
+  const rows=[...(D.purchases||[])].reverse().map(r=>{
+    const s=(D.suppliers||[]).find(x=>x.id===r.supplier_id)||{};
+    const m=(D.raw_materials||[]).find(x=>x.id===r.material_id)||{};
+    return `<tr><td>${r.date}</td><td>${s.name||"?"}</td><td>${m.display_name||"?"}</td><td class="mono">${r.quantity}</td><td class="mono">${fmt(r.rate)}</td><td class="mono bold">${fmt(r.total_value)}</td><td><button class="btn-del" onclick="delPurch('${r.id}')">X</button></td></tr>`;
+  }).join("");
+  return `<div class="card"><h3>Add Purchase</h3>
+    <div class="grid">
+      <div><label>Date</label><input type="date" id="pu-date" value="${today()}"></div>
+      <div><label>Supplier</label><select id="pu-supp"><option value="">-- pick --</option>${suppOpts}</select></div>
+      <div><label>Material</label><select id="pu-mat"><option value="">-- pick --</option>${matOpts}</select></div>
+      <div><label>Quantity</label><input type="number" id="pu-qty" value="0"></div>
+      <div><label>Rate (Rs.)</label><input type="number" id="pu-rate" value="0"></div>
+    </div>
+    <button class="btn" onclick="addPurch()">+ Add Purchase</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Supplier</th><th>Material</th><th>Qty</th><th>Rate</th><th>Total</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty">None yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addPurch=()=>save(async()=>{
+  const s=document.getElementById("pu-supp").value;
+  const m=document.getElementById("pu-mat").value;
+  if(!s||!m)throw new Error("Pick supplier and material");
+  const qty=+document.getElementById("pu-qty").value;
+  const rate=+document.getElementById("pu-rate").value;
+  await sbPost("purchases",{date:document.getElementById("pu-date").value,supplier_id:+s,material_id:+m,quantity:qty,rate:rate,total_value:qty*rate});
+});
+window.delPurch=id=>save(async()=>sbDel("purchases",id));
+
+// ─── SUPPLIERS ───
+function renderSuppliers(){
+  const bal=sup=>+(sup.opening_balance||0)+(D.purchases||[]).filter(r=>r.supplier_id===sup.id).reduce((a,r)=>a++(r.total_value||0),0)-(D.supplier_payments||[]).filter(r=>r.supplier_id===sup.id).reduce((a,r)=>a++(r.amount||0),0);
+  const rows=(D.suppliers||[]).map(s=>{const b=bal(s);return`<tr><td>${s.name}</td><td>${s.contact||""}</td><td class="mono">${fmt(s.opening_balance)}</td><td class="mono">${fmt((D.purchases||[]).filter(r=>r.supplier_id===s.id).reduce((a,r)=>a++(r.total_value||0),0))}</td><td class="mono green">${fmt((D.supplier_payments||[]).filter(r=>r.supplier_id===s.id).reduce((a,r)=>a++(r.amount||0),0))}</td><td class="mono bold ${b>0?'red':'green'}">${fmt(b)}</td><td><button class="btn-del" onclick="delSupp(${s.id})">X</button></td></tr>`;}).join("");
+  return `<div class="card"><h3>Add Supplier</h3>
+    <div class="grid3">
+      <div><label>Name</label><input id="s-name"></div>
+      <div><label>Contact</label><input id="s-contact"></div>
+      <div><label>Opening Balance (Rs.)</label><input type="number" id="s-ob" value="0"></div>
+    </div>
+    <button class="btn" onclick="addSupp()">+ Add Supplier</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Contact</th><th>Opening</th><th>Purchased</th><th>Paid</th><th>Balance</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty">None yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addSupp=()=>save(async()=>{const n=document.getElementById("s-name").value;if(!n)throw new Error("Name required");await sbPost("suppliers",{name:n,contact:document.getElementById("s-contact").value,opening_balance:+document.getElementById("s-ob").value});});
+window.delSupp=id=>save(async()=>sbDel("suppliers",id));
+
+// ─── CUSTOMERS ───
+function renderCustomers(){
+  const bal=c=>+(c.opening_balance||0)+(D.sales||[]).filter(r=>r.customer_id===c.id).reduce((a,r)=>a++(r.net_total||0),0)-(D.payments||[]).filter(r=>r.customer_id===c.id).reduce((a,r)=>a++(r.amount||0),0);
+  const rows=(D.customers||[]).map(c=>{const b=bal(c);return`<tr><td>${c.name}</td><td>${c.contact||""}</td><td class="mono">${fmt(c.opening_balance)}</td><td class="mono">${fmt((D.sales||[]).filter(r=>r.customer_id===c.id).reduce((a,r)=>a++(r.net_total||0),0))}</td><td class="mono green">${fmt((D.payments||[]).filter(r=>r.customer_id===c.id).reduce((a,r)=>a++(r.amount||0),0))}</td><td class="mono bold ${b>0?'red':'green'}">${fmt(b)}</td><td><button class="btn-del" onclick="delCust(${c.id})">X</button></td></tr>`;}).join("");
+  return `<div class="card"><h3>Add Customer</h3>
+    <div class="grid3">
+      <div><label>Name</label><input id="c-name"></div>
+      <div><label>Contact</label><input id="c-contact"></div>
+      <div><label>Opening Balance (Rs.)</label><input type="number" id="c-ob" value="0"></div>
+    </div>
+    <button class="btn" onclick="addCust()">+ Add Customer</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Contact</th><th>Opening</th><th>Total Sold</th><th>Received</th><th>Balance Due</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty">None yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addCust=()=>save(async()=>{const n=document.getElementById("c-name").value;if(!n)throw new Error("Name required");await sbPost("customers",{name:n,contact:document.getElementById("c-contact").value,opening_balance:+document.getElementById("c-ob").value});});
+window.delCust=id=>save(async()=>sbDel("customers",id));
+
+// ─── SALES ───
+function renderSales(){
+  const custOpts=(D.customers||[]).map(c=>`<option value="${c.id}">${c.name}</option>`).join("");
+  const stock=pid=>+(((D.products||[]).find(p=>p.id===+pid)||{}).opening_stock||0)+(D.production||[]).filter(r=>r.product_id===+pid).reduce((s,r)=>s++(r.quantity||0),0)-(D.sales||[]).filter(r=>r.product_id===+pid).reduce((s,r)=>s++(r.quantity||0),0);
+  const prodOpts=(D.products||[]).map(p=>`<option value="${p.id}" data-price="${p.selling_price||0}">${p.name} - ${p.color} (${stock(p.id)} doz)</option>`).join("");
+  const rows=[...(D.sales||[])].reverse().map(r=>{
+    const c=(D.customers||[]).find(x=>x.id===r.customer_id)||{};
+    const p=(D.products||[]).find(x=>x.id===r.product_id)||{};
+    return `<tr><td>${r.date}</td><td>${c.name||"?"}</td><td>${p.name||"?"} <span class="tag">${p.color||""}</span></td><td class="mono">${r.quantity}</td><td class="mono">${fmt(r.rate)}</td><td class="mono ${+r.discount?'amber':''}">${fmt(r.discount)}</td><td class="mono bold">${fmt(r.net_total)}</td><td><button class="btn-del" onclick="delSale('${r.id}')">X</button></td></tr>`;
+  }).join("");
+  return `<div class="card"><h3>New Sale</h3>
+    <div class="grid3">
+      <div><label>Date</label><input type="date" id="sa-date" value="${today()}"></div>
+      <div><label>Customer</label><select id="sa-cust"><option value="">-- pick --</option>${custOpts}</select></div>
+      <div><label>Product</label><select id="sa-prod" onchange="setRate(this)"><option value="">-- pick --</option>${prodOpts}</select></div>
+      <div><label>Quantity (dozens)</label><input type="number" id="sa-qty" value="0"></div>
+      <div><label>Rate (Rs.)</label><input type="number" id="sa-rate" value="0"></div>
+      <div><label>Discount (Rs.)</label><input type="number" id="sa-disc" value="0"></div>
+    </div>
+    <button class="btn" onclick="addSale()">+ Save Sale</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Customer</th><th>Product</th><th>Qty</th><th>Rate</th><th>Discount</th><th>Net Total</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty">None yet.</td></tr>'}</tbody></table></div>`;
+}
+window.setRate=sel=>{const opt=sel.options[sel.selectedIndex];if(opt)document.getElementById("sa-rate").value=opt.dataset.price||0;};
+window.addSale=()=>save(async()=>{
+  const c=document.getElementById("sa-cust").value;
+  const p=document.getElementById("sa-prod").value;
+  if(!c||!p)throw new Error("Pick customer and product");
+  const qty=+document.getElementById("sa-qty").value;
+  const rate=+document.getElementById("sa-rate").value;
+  const disc=+document.getElementById("sa-disc").value;
+  await sbPost("sales",{date:document.getElementById("sa-date").value,customer_id:+c,product_id:+p,quantity:qty,rate:rate,discount:disc,net_total:qty*rate-disc});
+});
+window.delSale=id=>save(async()=>sbDel("sales",id));
+
+// ─── PAYMENTS ───
+function renderPayments(){
+  const custOpts=(D.customers||[]).map(c=>`<option value="${c.id}">${c.name}</option>`).join("");
+  const rows=[...(D.payments||[])].reverse().map(r=>{const c=(D.customers||[]).find(x=>x.id===r.customer_id)||{};return`<tr><td>${r.date}</td><td>${c.name||"?"}</td><td class="mono green bold">${fmt(r.amount)}</td><td>${r.note||""}</td><td><button class="btn-del" onclick="delPay('${r.id}')">X</button></td></tr>`;}).join("");
+  return `<div class="card"><h3>Payment from Customer</h3>
+    <div class="grid">
+      <div><label>Date</label><input type="date" id="pay-date" value="${today()}"></div>
+      <div><label>Customer</label><select id="pay-cust"><option value="">-- pick --</option>${custOpts}</select></div>
+      <div><label>Amount (Rs.)</label><input type="number" id="pay-amt" value="0"></div>
+      <div><label>Note</label><input id="pay-note"></div>
+    </div>
+    <button class="btn" onclick="addPay()">+ Add Payment</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Customer</th><th>Amount</th><th>Note</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="empty">None yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addPay=()=>save(async()=>{const c=document.getElementById("pay-cust").value;if(!c)throw new Error("Pick customer");await sbPost("payments",{date:document.getElementById("pay-date").value,customer_id:+c,amount:+document.getElementById("pay-amt").value,note:document.getElementById("pay-note").value});});
+window.delPay=id=>save(async()=>sbDel("payments",id));
+
+// ─── SUPPLIER PAYMENTS ───
+function renderSPay(){
+  const suppOpts=(D.suppliers||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join("");
+  const rows=[...(D.supplier_payments||[])].reverse().map(r=>{const s=(D.suppliers||[]).find(x=>x.id===r.supplier_id)||{};return`<tr><td>${r.date}</td><td>${s.name||"?"}</td><td class="mono red bold">${fmt(r.amount)}</td><td>${r.note||""}</td><td><button class="btn-del" onclick="delSPay('${r.id}')">X</button></td></tr>`;}).join("");
+  return `<div class="card"><h3>Payment to Supplier</h3>
+    <div class="grid">
+      <div><label>Date</label><input type="date" id="sp-date" value="${today()}"></div>
+      <div><label>Supplier</label><select id="sp-supp"><option value="">-- pick --</option>${suppOpts}</select></div>
+      <div><label>Amount (Rs.)</label><input type="number" id="sp-amt" value="0"></div>
+      <div><label>Note</label><input id="sp-note"></div>
+    </div>
+    <button class="btn" onclick="addSPay()">+ Add Payment</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Supplier</th><th>Amount</th><th>Note</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="empty">None yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addSPay=()=>save(async()=>{const s=document.getElementById("sp-supp").value;if(!s)throw new Error("Pick supplier");await sbPost("supplier_payments",{date:document.getElementById("sp-date").value,supplier_id:+s,amount:+document.getElementById("sp-amt").value,note:document.getElementById("sp-note").value});});
+window.delSPay=id=>save(async()=>sbDel("supplier_payments",id));
+
+// ─── EXPENSES ───
+function renderExpenses(){
+  const CATS=["Rent","Electricity","Transport","Maintenance","Marketing","Misc"];
+  const rows=[...(D.expenses||[])].reverse().map(r=>`<tr><td>${r.date}</td><td>${r.category}</td><td class="mono">${fmt(r.amount)}</td><td>${r.note||""}</td><td><button class="btn-del" onclick="delExp('${r.id}')">X</button></td></tr>`).join("");
+  return `<div class="card"><h3>Add Expense</h3>
+    <div class="grid">
+      <div><label>Date</label><input type="date" id="ex-date" value="${today()}"></div>
+      <div><label>Category</label><select id="ex-cat">${CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
+      <div><label>Amount (Rs.)</label><input type="number" id="ex-amt" value="0"></div>
+      <div><label>Note</label><input id="ex-note"></div>
+    </div>
+    <button class="btn" onclick="addExp()">+ Add Expense</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Category</th><th>Amount</th><th>Note</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="empty">None yet.</td></tr>'}</tbody></table></div>`;
+}
+window.addExp=()=>save(async()=>sbPost("expenses",{date:document.getElementById("ex-date").value,category:document.getElementById("ex-cat").value,amount:+document.getElementById("ex-amt").value,note:document.getElementById("ex-note").value}));
+window.delExp=id=>save(async()=>sbDel("expenses",id));
+
+// ─── REPORTS ───
+let repPeriod=29;
+function renderReports(){
+  const PERIODS=[{l:"Daily",d:0},{l:"Weekly",d:6},{l:"Fortnightly",d:14},{l:"Monthly",d:29},{l:"Annual",d:364}];
+  const pS=(D.sales||[]).filter(r=>inRange(r.date,repPeriod));
+  const pE=(D.expenses||[]).filter(r=>inRange(r.date,repPeriod));
+  const pP=(D.production||[]).filter(r=>inRange(r.date,repPeriod));
+  const revenue=pS.reduce((s,r)=>s++(r.net_total||0),0);
+  const discounts=pS.reduce((s,r)=>s++(r.discount||0),0);
+  const overheads=pE.reduce((s,r)=>s++(r.amount||0),0)+discounts;
+  const wages=pP.reduce((s,r)=>s++(r.wage_earned||0),0);
+  const rawVal=(D.raw_materials||[]).reduce((s,r)=>s++(r.opening_stock||0)*+(r.cost_per_unit||0),0);
+  const custBal=(D.customers||[]).reduce((s,c)=>{const sold=(D.sales||[]).filter(r=>r.customer_id===c.id).reduce((a,r)=>a++(r.net_total||0),0);const paid=(D.payments||[]).filter(r=>r.customer_id===c.id).reduce((a,r)=>a++(r.amount||0),0);return s++(c.opening_balance||0)+sold-paid;},0);
+  const suppBal=(D.suppliers||[]).reduce((s,sup)=>{const b=(D.purchases||[]).filter(r=>r.supplier_id===sup.id).reduce((a,r)=>a++(r.total_value||0),0);const p=(D.supplier_payments||[]).filter(r=>r.supplier_id===sup.id).reduce((a,r)=>a++(r.amount||0),0);return s++(sup.opening_balance||0)+b-p;},0);
+  const nwc=rawVal+custBal-suppBal++(D.settings.cash_in_hand||0);
+  const gross=revenue-wages;
+  const net=gross-overheads;
+  const margin=revenue?(net/revenue*100).toFixed(1):"--";
+  const roi=nwc?(net/nwc*100).toFixed(2):"--";
+  const units=pP.reduce((s,r)=>s++(r.quantity||0),0);
+  const custRows=(D.customers||[]).map(c=>{const sold=(D.sales||[]).filter(r=>r.customer_id===c.id).reduce((a,r)=>a++(r.net_total||0),0);const paid=(D.payments||[]).filter(r=>r.customer_id===c.id).reduce((a,r)=>a++(r.amount||0),0);const b=+(c.opening_balance||0)+sold-paid;return`<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #f5f5f4"><span>${c.name}</span><span class="mono bold ${b>0?'red':'green'}">${fmt(b)}</span></div>`;}).join("")||"<div style='color:#78716c;font-size:12px'>No customers.</div>";
+  const suppRows=(D.suppliers||[]).map(sup=>{const b2=(D.purchases||[]).filter(r=>r.supplier_id===sup.id).reduce((a,r)=>a++(r.total_value||0),0);const p2=(D.supplier_payments||[]).filter(r=>r.supplier_id===sup.id).reduce((a,r)=>a++(r.amount||0),0);const b=+(sup.opening_balance||0)+b2-p2;return`<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #f5f5f4"><span>${sup.name}</span><span class="mono bold ${b>0?'red':'green'}">${fmt(b)}</span></div>`;}).join("")||"<div style='color:#78716c;font-size:12px'>No suppliers.</div>";
+  const periodBtns=PERIODS.map(p=>`<button class="period-btn ${repPeriod===p.d?'active':''}" onclick="setRepPeriod(${p.d})">${p.l}</button>`).join("");
+  return `<div class="card"><h3 style="display:inline">Reports</h3> ${periodBtns}
+    <div class="stat-grid" style="margin-top:12px">
+      <div class="stat ${net>0?'g':'r'}"><div class="stat-title">Net Profit</div><div class="stat-val ${net>0?'green':'red'}">${fmt(net)}</div><div class="stat-sub">Margin ${margin}%</div></div>
+      <div class="stat"><div class="stat-title">Revenue</div><div class="stat-val">${fmt(revenue)}</div><div class="stat-sub">${pS.length} sales</div></div>
+      <div class="stat"><div class="stat-title">Wages</div><div class="stat-val">${fmt(wages)}</div><div class="stat-sub">${units} doz produced</div></div>
+      <div class="stat"><div class="stat-title">Overheads+Discounts</div><div class="stat-val">${fmt(overheads)}</div><div class="stat-sub">Discounts: ${fmt(discounts)}</div></div>
+      <div class="stat ${nwc>0?'g':'r'}"><div class="stat-title">Net Working Capital</div><div class="stat-val ${nwc>0?'green':'red'}">${fmt(nwc)}</div><div class="stat-sub">Stock+Recv-Pay+Cash</div></div>
+      <div class="stat ${+roi>0?'g':''}"><div class="stat-title">ROI</div><div class="stat-val ${+roi>0?'green':''}">${roi==="--"?"--":roi+"%"}</div><div class="stat-sub">Net Profit / NWC</div></div>
+    </div>
+    <div class="card"><div style="font-weight:700;margin-bottom:10px">Profit & Loss</div>
+      <table><tbody>
+        <tr><td style="padding:5px 0;font-size:13px">Sales Revenue (net of discounts)</td><td class="mono" style="text-align:right">${fmt(revenue)}</td></tr>
+        <tr><td style="padding:5px 0;font-size:13px">Wage Cost</td><td class="mono" style="text-align:right">- ${fmt(wages)}</td></tr>
+        <tr><td style="padding:5px 0;font-size:13px;font-weight:700">Gross Profit</td><td class="mono bold ${gross>0?'green':'red'}" style="text-align:right">${fmt(gross)}</td></tr>
+        <tr><td style="padding:5px 0;font-size:13px">Overheads & Discounts</td><td class="mono" style="text-align:right">- ${fmt(overheads)}</td></tr>
+        <tr><td style="padding:5px 0;font-size:13px;font-weight:700">Net Profit</td><td class="mono bold ${net>0?'green':'red'}" style="text-align:right">${fmt(net)}</td></tr>
+      </tbody></table>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="card"><div style="font-weight:700;margin-bottom:8px">Customer Balances</div>${custRows}</div>
+      <div class="card"><div style="font-weight:700;margin-bottom:8px">Supplier Balances</div>${suppRows}</div>
+    </div>
+  </div>`;
+}
+window.setRepPeriod=d=>{repPeriod=d;render()};
+
+// ─── SETTINGS ───
+function renderSettings(){
+  const cats=(D.categories||[]).map(c=>`<tr>
+    <td style="font-weight:700;padding:7px 10px">${c.name}</td>
+    ${["ragzine_per_pc","mash_per_pc","daimod_per_pc","naki_feeta_per_pc","pipe_per_pc","wage_rate"].map(f=>`<td style="padding:4px 6px"><input type="number" value="${c[f]||0}" style="width:70px" onblur="updCat(${c.id},'${f}',this.value)"></td>`).join("")}
+  </tr>`).join("");
+  return `<div class="card"><h3>Business</h3>
+    <div style="margin-bottom:10px"><label>Business Name</label><input id="set-biz" value="${D.settings.business_name||""}"></div>
+    <div style="margin-bottom:10px"><label>Cash in Hand (Rs.)</label><input type="number" id="set-cash" value="${D.settings.cash_in_hand||0}"></div>
+    <button class="btn" onclick="saveSettings()">Save</button>
+  </div>
+  <div class="card"><h3>Categories — Material Averages & Wage Rate</h3>
+    <div style="font-size:12px;color:#78716c;margin-bottom:10px">Edit values and click away to save. Per-piece averages for all products in that category.</div>
+    <div class="tbl-wrap"><table><thead><tr><th>Category</th><th>Ragzine/pc</th><th>Mash/pc</th><th>Daimod/pc</th><th>Naki Feeta/pc</th><th>Pipe/pc</th><th>Wage/pc</th></tr></thead><tbody>${cats}</tbody></table></div>
+  </div>`;
+}
+window.saveSettings=()=>save(async()=>{
+  const biz=document.getElementById("set-biz").value;
+  const cash=+document.getElementById("set-cash").value;
+  await sbPatch("settings",1,{business_name:biz,cash_in_hand:cash});
+  document.getElementById("biz-name").textContent=biz;
+});
+window.updCat=(id,f,v)=>save(async()=>sbPatch("categories",id,{[f]:+v}));
+
+// ─── INIT ───
+async function init(){
+  initNav();
+  await loadAll();
+  render();
+  // Poll for updates every 30 seconds (simple sync)
+  setInterval(async()=>{await loadAll();render();},30000);
+}
+init();
+</script>
+</body>
+</html>
