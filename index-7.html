@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Isfahan Traders</title>
+<style>
+body{font-family:sans-serif;margin:0;background:#fafaf9}
+.hdr{background:#92400e;color:#fff;padding:12px 16px;font-size:16px;font-weight:bold}
+.nav{background:#fff;border-bottom:1px solid #ddd;overflow-x:auto;white-space:nowrap;padding:8px}
+.nav button{margin:2px;padding:5px 10px;border-radius:15px;border:1px solid #ddd;cursor:pointer;font-size:11px}
+.nav button.on{background:#b45309;color:#fff;border-color:#b45309}
+.content{padding:14px;max-width:900px;margin:0 auto}
+.card{background:#fff;border:1px solid #e5e5e5;border-radius:8px;padding:14px;margin-bottom:12px}
+h3{margin:0 0 12px;color:#92400e;font-size:15px}
+label{display:block;font-size:11px;font-weight:bold;color:#666;margin-bottom:3px;margin-top:8px}
+input,select{width:100%;padding:7px 9px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box}
+.btn{background:#b45309;color:#fff;border:none;border-radius:6px;padding:8px 16px;font-weight:bold;cursor:pointer;font-size:13px;margin-top:10px}
+.del{background:#fff0f0;color:#c00;border:1px solid #fcc;border-radius:5px;padding:3px 8px;cursor:pointer;font-size:11px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#fafaf9;padding:7px 8px;text-align:left;font-size:10px;text-transform:uppercase;color:#666;border-bottom:1px solid #eee}
+td{padding:6px 8px;border-bottom:1px solid #f5f5f5}
+.wrap{border:1px solid #ddd;border-radius:8px;overflow:hidden;overflow-x:auto}
+.g{color:#059669;font-weight:bold}
+.r{color:#dc2626;font-weight:bold}
+.m{font-family:monospace}
+.stat{display:inline-block;background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px;margin:4px;min-width:140px;vertical-align:top}
+.sval{font-size:18px;font-weight:bold;font-family:monospace}
+.err{background:#fee;color:#c00;padding:10px;border-radius:6px;margin:10px 0}
+</style>
+</head>
+<body>
+<div class="hdr">Isfahan Traders &mdash; Shoe Upper Ledger</div>
+<div class="nav" id="nav"></div>
+<div class="content" id="page"><p>Loading...</p></div>
+
+<script>
+var URL_SB = "https://qljqfiyamrmrxvcrwopy.supabase.co";
+var KEY_SB = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFsanFmaXlhbXJtcnh2Y3J3b3B5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5NzY5NTcsImV4cCI6MjA5NzU1Mjk1N30.smMb5JbjU5qVg8c0lXIeRcNCJMc8vWjiZVEuNIAXzy0";
+
+var D = {};
+var TAB = "Dashboard";
+
+function apiGet(table, cb) {
+  var xhr = new XMLHttpRequest();
+  xhr.open("GET", URL_SB + "/rest/v1/" + table + "?select=*&order=id", true);
+  xhr.setRequestHeader("apikey", KEY_SB);
+  xhr.setRequestHeader("Authorization", "Bearer " + KEY_SB);
+  xhr.onload = function() { cb(null, JSON.parse(xhr.responseText)); };
+  xhr.onerror = function() { cb("Network error"); };
+  xhr.send();
+}
+
+function apiPost(table, data, cb) {
+  var xhr = new XMLHttpRequest();
+  xhr.open("POST", URL_SB + "/rest/v1/" + table, true);
+  xhr.setRequestHeader("apikey", KEY_SB);
+  xhr.setRequestHeader("Authorization", "Bearer " + KEY_SB);
+  xhr.setRequestHeader("Content-Type", "application/json");
+  xhr.setRequestHeader("Prefer", "return=representation");
+  xhr.onload = function() {
+    if (xhr.status >= 200 && xhr.status < 300) { cb(null); }
+    else { cb(xhr.responseText); }
+  };
+  xhr.onerror = function() { cb("Network error"); };
+  xhr.send(JSON.stringify(data));
+}
+
+function apiPatch(table, id, data, cb) {
+  var xhr = new XMLHttpRequest();
+  xhr.open("PATCH", URL_SB + "/rest/v1/" + table + "?id=eq." + id, true);
+  xhr.setRequestHeader("apikey", KEY_SB);
+  xhr.setRequestHeader("Authorization", "Bearer " + KEY_SB);
+  xhr.setRequestHeader("Content-Type", "application/json");
+  xhr.onload = function() { cb(null); };
+  xhr.onerror = function() { cb("Network error"); };
+  xhr.send(JSON.stringify(data));
+}
+
+function apiDel(table, id, cb) {
+  var xhr = new XMLHttpRequest();
+  xhr.open("DELETE", URL_SB + "/rest/v1/" + table + "?id=eq." + id, true);
+  xhr.setRequestHeader("apikey", KEY_SB);
+  xhr.setRequestHeader("Authorization", "Bearer " + KEY_SB);
+  xhr.onload = function() { cb(null); };
+  xhr.onerror = function() { cb("Network error"); };
+  xhr.send();
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function money(n) {
+  return "Rs." + Math.round(+(n || 0)).toLocaleString("en-IN");
+}
+
+function daysAgo(s) {
+  var d = new Date(s + "T00:00:00");
+  var n = new Date();
+  n.setHours(0, 0, 0, 0);
+  return Math.round((n - d) / 86400000);
+}
+
+function inRange(s, days) {
+  var x = daysAgo(s);
+  return x >= 0 && x <= days;
+}
+
+function num(n) {
+  var v = +(n || 0);
+  return v % 1 === 0 ? String(v) : v.toFixed(2);
+}
+
+function showMsg(msg, err) {
+  var el = document.getElementById("msg");
+  if (!el) return;
+  el.textContent = msg;
+  el.style.background = err ? "#fee" : "#f0fdf4";
+  el.style.color = err ? "#c00" : "#059669";
+  el.style.display = "block";
+  setTimeout(function() { el.style.display = "none"; }, 3000);
+}
+
+var TABS = ["Dashboard","Raw Materials","Products","Labor","Material Issued","Production","Advances","Labor Ledger","Purchases","Suppliers","Customers","Sales","Payments","Supplier Payments","Expenses","Reports","Settings"];
+
+function initNav() {
+  var nav = document.getElementById("nav");
+  var html = "";
+  for (var i = 0; i < TABS.length; i++) {
+    html += '<button id="nb' + i + '" onclick="go(' + i + ')">' + TABS[i] + "</button>";
+  }
+  nav.innerHTML = html;
+  document.getElementById("nb0").className = "on";
+}
+
+function go(i) {
+  for (var j = 0; j < TABS.length; j++) {
+    var b = document.getElementById("nb" + j);
+    if (b) b.className = "";
+  }
+  document.getElementById("nb" + i).className = "on";
+  TAB = TABS[i];
+  render();
+}
+
+function opt(arr, valF, txtF) {
+  var h = "";
+  for (var i = 0; i < arr.length; i++) {
+    h += '<option value="' + arr[i][valF] + '">' + arr[i][txtF] + "</option>";
+  }
+  return h;
+}
+
+function find(arr, id) {
+  for (var i = 0; i < arr.length; i++) {
+    if (arr[i].id === id) return arr[i];
+  }
+  return {};
+}
+
+function sum(arr, f) {
+  var s = 0;
+  for (var i = 0; i < arr.length; i++) s += +(arr[i][f] || 0);
+  return s;
+}
+
+function filter(arr, f, v) {
+  var r = [];
+  for (var i = 0; i < arr.length; i++) if (arr[i][f] === v) r.push(arr[i]);
+  return r;
+}
+
+function rev(arr) {
+  var r = [];
+  for (var i = arr.length - 1; i >= 0; i--) r.push(arr[i]);
+  return r;
+}
+
+function loadAll(cb) {
+  var tables = ["settings","categories","raw_materials","suppliers","purchases","products","labor","material_issued","production","advances","customers","sales","payments","supplier_payments","expenses"];
+  var done = 0;
+  for (var i = 0; i < tables.length; i++) {
+    (function(t) {
+      apiGet(t, function(err, data) {
+        if (!err) D[t] = data;
+        done++;
+        if (done === tables.length) {
+          D.settings = D.settings && D.settings[0] ? D.settings[0] : {business_name:"Isfahan Traders", cash_in_hand:0};
+          if (cb) cb();
+        }
+      });
+    })(tables[i]);
+  }
+}
+
+function doSave(fn) {
+  fn(function(err) {
+    if (err) { showMsg("Error: " + err, true); }
+    else {
+      showMsg("Saved!");
+      loadAll(render);
+    }
+  });
+}
+
+function render() {
+  var p = document.getElementById("page");
+  p.innerHTML = '<div id="msg" style="display:none;padding:8px;border-radius:6px;margin-bottom:10px"></div>';
+  if (TAB === "Dashboard") p.innerHTML += renderDash();
+  else if (TAB === "Raw Materials") p.innerHTML += renderRM();
+  else if (TAB === "Products") p.innerHTML += renderProds();
+  else if (TAB === "Labor") p.innerHTML += renderLabor();
+  else if (TAB === "Material Issued") p.innerHTML += renderMI();
+  else if (TAB === "Production") p.innerHTML += renderProd();
+  else if (TAB === "Advances") p.innerHTML += renderAdv();
+  else if (TAB === "Labor Ledger") p.innerHTML += renderLedger();
+  else if (TAB === "Purchases") p.innerHTML += renderPurch();
+  else if (TAB === "Suppliers") p.innerHTML += renderSupp();
+  else if (TAB === "Customers") p.innerHTML += renderCust();
+  else if (TAB === "Sales") p.innerHTML += renderSales();
+  else if (TAB === "Payments") p.innerHTML += renderPay();
+  else if (TAB === "Supplier Payments") p.innerHTML += renderSPay();
+  else if (TAB === "Expenses") p.innerHTML += renderExp();
+  else if (TAB === "Reports") p.innerHTML += renderRep();
+  else if (TAB === "Settings") p.innerHTML += renderSett();
+}
+
+// ── DASHBOARD ──
+function renderDash() {
+  var sales = D.sales || [];
+  var raw = D.raw_materials || [];
+  var prods = D.products || [];
+  var prod = D.production || [];
+  var pays = D.payments || [];
+  var custs = D.customers || [];
+  var supps = D.suppliers || [];
+  var spays = D.supplier_payments || [];
+  var purch = D.purchases || [];
+
+  var rev30 = 0;
+  for (var i = 0; i < sales.length; i++) if (inRange(sales[i].date, 29)) rev30 += +(sales[i].net_total || 0);
+
+  var rawVal = 0;
+  for (var i = 0; i < raw.length; i++) rawVal += +(raw[i].opening_stock || 0) * +(raw[i].cost_per_unit || 0);
+
+  var custBal = 0;
+  for (var i = 0; i < custs.length; i++) {
+    var sold = sum(filter(sales, "customer_id", custs[i].id), "net_total");
+    var paid = sum(filter(pays, "customer_id", custs[i].id), "amount");
+    custBal += +(custs[i].opening_balance || 0) + sold - paid;
+  }
+
+  var suppBal = 0;
+  for (var i = 0; i < supps.length; i++) {
+    var bought = sum(filter(purch, "supplier_id", supps[i].id), "total_value");
+    var spaid = sum(filter(spays, "supplier_id", supps[i].id), "amount");
+    suppBal += +(supps[i].opening_balance || 0) + bought - spaid;
+  }
+
+  var nwc = rawVal + custBal - suppBal + +(D.settings.cash_in_hand || 0);
+
+  var h = '<div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">REVENUE (30d)</div><div class="sval">' + money(rev30) + '</div></div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">CUSTOMER RECEIVABLE</div><div class="sval ' + (custBal > 0 ? "g" : "") + '">' + money(custBal) + '</div></div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">SUPPLIER PAYABLE</div><div class="sval ' + (suppBal > 0 ? "r" : "") + '">' + money(suppBal) + '</div></div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">NET WORKING CAPITAL</div><div class="sval ' + (nwc > 0 ? "g" : "r") + '">' + money(nwc) + '</div></div>';
+  h += '</div>';
+
+  h += '<div class="card"><h3>Products in Stock</h3>';
+  for (var i = 0; i < prods.length; i++) {
+    var made = sum(filter(prod, "product_id", prods[i].id), "quantity");
+    var sld = sum(filter(sales, "product_id", prods[i].id), "quantity");
+    var stk = +(prods[i].opening_stock || 0) + made - sld;
+    h += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px solid #f5f5f5">';
+    h += '<span>' + prods[i].name + ' [' + prods[i].color + ']</span>';
+    h += '<span class="m ' + (stk <= 0 ? "r" : "") + '">' + stk + ' doz</span></div>';
+  }
+  if (!prods.length) h += '<p style="color:#666;font-size:12px">No products yet.</p>';
+  h += '</div>';
+  return h;
+}
+
+// ── RAW MATERIALS ──
+function renderRM() {
+  var rms = D.raw_materials || [];
+  var colors = ["Black","Green","Brown","Mustard","Cream","Maroon","Pink","Zink","Purple","Grey","No Color"];
+  var copts = "";
+  for (var i = 0; i < colors.length; i++) copts += '<option>' + colors[i] + '</option>';
+
+  var h = '<div class="card"><h3>Add Material</h3>';
+  h += '<label>Name</label><input id="rn" value="Ragzine">';
+  h += '<label>Color</label><select id="rc">' + copts + '</select>';
+  h += '<label>Unit</label><input id="ru" value="meter">';
+  h += '<label>Opening Stock</label><input type="number" id="ros" value="0">';
+  h += '<label>Cost per Unit (Rs.)</label><input type="number" id="rcu" value="0">';
+  h += '<button class="btn" onclick="addRM()">+ Add Material</button></div>';
+
+  h += '<div class="wrap"><table><thead><tr><th>Name</th><th>Color</th><th>Unit</th><th>Opening Stock</th><th>Cost/Unit</th><th>Value</th><th></th></tr></thead><tbody>';
+  for (var i = 0; i < rms.length; i++) {
+    var r = rms[i];
+    h += '<tr><td>' + r.material_name + '</td><td>' + r.color + '</td><td>' + r.unit + '</td>';
+    h += '<td><input type="number" value="' + (r.opening_stock || 0) + '" style="width:80px" onblur="updRM(' + r.id + ','opening_stock',this.value)"></td>';
+    h += '<td><input type="number" value="' + (r.cost_per_unit || 0) + '" style="width:80px" onblur="updRM(' + r.id + ','cost_per_unit',this.value)"></td>';
+    h += '<td class="m">' + money(+(r.opening_stock || 0) * +(r.cost_per_unit || 0)) + '</td>';
+    h += '<td><button class="del" onclick="delRM(' + r.id + ')">X</button></td></tr>';
+  }
+  if (!rms.length) h += '<tr><td colspan="7" style="text-align:center;padding:20px;color:#666">No materials yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+
+window.addRM = function() {
+  doSave(function(cb) {
+    var n = document.getElementById("rn").value;
+    var c = document.getElementById("rc").value;
+    if (!n) return cb("Name required");
+    var dn = c === "No Color" ? n : n + " - " + c;
+    apiPost("raw_materials", {material_name:n, color:c, display_name:dn, unit:document.getElementById("ru").value, opening_stock:+document.getElementById("ros").value, cost_per_unit:+document.getElementById("rcu").value, reorder_level:30}, cb);
+  });
+};
+window.updRM = function(id, f, v) { doSave(function(cb) { var d = {}; d[f] = +v; apiPatch("raw_materials", id, d, cb); }); };
+window.delRM = function(id) { doSave(function(cb) { apiDel("raw_materials", id, cb); }); };
+
+// ── PRODUCTS ──
+function renderProds() {
+  var prods = D.products || [];
+  var cats = D.categories || [];
+  var prod = D.production || [];
+  var sales = D.sales || [];
+  var colors = ["Black","Green","Brown","Mustard","Cream","Maroon","Pink","Zink","Purple","Grey"];
+  var copts = ""; for (var i = 0; i < colors.length; i++) copts += '<option>' + colors[i] + '</option>';
+  var catopts = ""; for (var i = 0; i < cats.length; i++) catopts += '<option>' + cats[i].name + '</option>';
+
+  var h = '<div class="card"><h3>Add Product</h3>';
+  h += '<label>Name (01, 02...)</label><input id="pn" value="01">';
+  h += '<label>Category</label><select id="pcat">' + catopts + '</select>';
+  h += '<label>Color</label><select id="pcol">' + copts + '</select>';
+  h += '<label>Selling Price (Rs.)</label><input type="number" id="psp" value="0">';
+  h += '<label>Opening Stock</label><input type="number" id="pos" value="0">';
+  h += '<button class="btn" onclick="addProd()">+ Add Product</button></div>';
+
+  h += '<div class="wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Color</th><th>Price</th><th>Opening</th><th>Stock</th><th></th></tr></thead><tbody>';
+  for (var i = 0; i < prods.length; i++) {
+    var p = prods[i];
+    var made = sum(filter(prod, "product_id", p.id), "quantity");
+    var sld = sum(filter(sales, "product_id", p.id), "quantity");
+    var stk = +(p.opening_stock || 0) + made - sld;
+    h += '<tr><td>' + p.name + '</td><td>' + p.category + '</td><td>' + p.color + '</td>';
+    h += '<td><input type="number" value="' + (p.selling_price || 0) + '" style="width:80px" onblur="updProd(' + p.id + ','selling_price',this.value)"></td>';
+    h += '<td><input type="number" value="' + (p.opening_stock || 0) + '" style="width:70px" onblur="updProd(' + p.id + ','opening_stock',this.value)"></td>';
+    h += '<td class="m ' + (stk <= 0 ? "r" : "") + '">' + stk + '</td>';
+    h += '<td><button class="del" onclick="delProd(' + p.id + ')">X</button></td></tr>';
+  }
+  if (!prods.length) h += '<tr><td colspan="7" style="text-align:center;padding:20px;color:#666">No products yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.addProd = function() {
+  doSave(function(cb) {
+    var n = document.getElementById("pn").value;
+    if (!n) return cb("Name required");
+    apiPost("products", {name:n, category:document.getElementById("pcat").value, color:document.getElementById("pcol").value, selling_price:+document.getElementById("psp").value, opening_stock:+document.getElementById("pos").value}, cb);
+  });
+};
+window.updProd = function(id, f, v) { doSave(function(cb) { var d = {}; d[f] = +v; apiPatch("products", id, d, cb); }); };
+window.delProd = function(id) { doSave(function(cb) { apiDel("products", id, cb); }); };
+
+// ── LABOR ──
+function renderLabor() {
+  var labor = D.labor || [];
+  var h = '<div class="card"><h3>Add Worker</h3>';
+  h += '<label>Name</label><input id="ln">';
+  h += '<label>Phone</label><input id="lph">';
+  h += '<label>Adult Wage/pc (Rs.)</label><input type="number" id="law" value="30">';
+  h += '<label>Kids Wage/pc (Rs.)</label><input type="number" id="lkw" value="20">';
+  h += '<label>Opening Balance (Rs.)</label><input type="number" id="lob" value="0">';
+  h += '<button class="btn" onclick="addLabor()">+ Add Worker</button></div>';
+  h += '<div class="wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Adult/pc</th><th>Kids/pc</th><th>Opening</th><th></th></tr></thead><tbody>';
+  for (var i = 0; i < labor.length; i++) {
+    var l = labor[i];
+    h += '<tr><td>' + l.name + '</td><td>' + (l.phone || "") + '</td>';
+    h += '<td><input type="number" value="' + (l.adult_wage_per_pc || 0) + '" style="width:70px" onblur="updLabor(' + l.id + ','adult_wage_per_pc',this.value)"></td>';
+    h += '<td><input type="number" value="' + (l.kids_wage_per_pc || 0) + '" style="width:70px" onblur="updLabor(' + l.id + ','kids_wage_per_pc',this.value)"></td>';
+    h += '<td><input type="number" value="' + (l.opening_balance_payable || 0) + '" style="width:80px" onblur="updLabor(' + l.id + ','opening_balance_payable',this.value)"></td>';
+    h += '<td><button class="del" onclick="delLabor(' + l.id + ')">X</button></td></tr>';
+  }
+  if (!labor.length) h += '<tr><td colspan="6" style="text-align:center;padding:20px;color:#666">No workers yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.addLabor = function() {
+  doSave(function(cb) {
+    var n = document.getElementById("ln").value;
+    if (!n) return cb("Name required");
+    apiPost("labor", {name:n, phone:document.getElementById("lph").value, adult_wage_per_pc:+document.getElementById("law").value, kids_wage_per_pc:+document.getElementById("lkw").value, opening_balance_payable:+document.getElementById("lob").value}, cb);
+  });
+};
+window.updLabor = function(id, f, v) { doSave(function(cb) { var d = {}; d[f] = +v; apiPatch("labor", id, d, cb); }); };
+window.delLabor = function(id) { doSave(function(cb) { apiDel("labor", id, cb); }); };
+
+// ── MATERIAL ISSUED ──
+function renderMI() {
+  var labor = D.labor || [];
+  var mats = D.raw_materials || [];
+  var mi = D.material_issued || [];
+  var lopts = ""; for (var i = 0; i < labor.length; i++) lopts += '<option value="' + labor[i].id + '">' + labor[i].name + '</option>';
+  var mopts = ""; for (var i = 0; i < mats.length; i++) mopts += '<option value="' + mats[i].id + '">' + mats[i].display_name + '</option>';
+  var h = '<div class="card"><h3>Issue Material to Worker</h3>';
+  h += '<label>Date</label><input type="date" id="mid" value="' + today() + '">';
+  h += '<label>Worker</label><select id="mil"><option value="">-- pick --</option>' + lopts + '</select>';
+  h += '<label>Material</label><select id="mim"><option value="">-- pick --</option>' + mopts + '</select>';
+  h += '<label>Quantity</label><input type="number" id="miq" value="0">';
+  h += '<button class="btn" onclick="addMI()">+ Issue</button></div>';
+  h += '<div class="wrap"><table><thead><tr><th>Date</th><th>Worker</th><th>Material</th><th>Qty</th><th></th></tr></thead><tbody>';
+  var rows = rev(mi);
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var l = find(labor, r.labor_id);
+    var m = find(mats, r.material_id);
+    h += '<tr><td>' + r.date + '</td><td>' + (l.name || "?") + '</td><td>' + (m.display_name || "?") + '</td><td class="m">' + r.quantity + '</td><td><button class="del" onclick="delMI('' + r.id + '')">X</button></td></tr>';
+  }
+  if (!mi.length) h += '<tr><td colspan="5" style="text-align:center;padding:20px;color:#666">None yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.addMI = function() {
+  doSave(function(cb) {
+    var l = document.getElementById("mil").value;
+    var m = document.getElementById("mim").value;
+    if (!l || !m) return cb("Pick worker and material");
+    apiPost("material_issued", {date:document.getElementById("mid").value, labor_id:+l, material_id:+m, quantity:+document.getElementById("miq").value}, cb);
+  });
+};
+window.delMI = function(id) { doSave(function(cb) { apiDel("material_issued", id, cb); }); };
+
+// ── PRODUCTION ──
+function renderProd() {
+  var labor = D.labor || [];
+  var prods = D.products || [];
+  var prod = D.production || [];
+  var lopts = ""; for (var i = 0; i < labor.length; i++) lopts += '<option value="' + labor[i].id + '">' + labor[i].name + '</option>';
+  var popts = ""; for (var i = 0; i < prods.length; i++) popts += '<option value="' + prods[i].id + '">' + prods[i].name + ' (' + prods[i].category + ' - ' + prods[i].color + ')</option>';
+  var h = '<div class="card"><h3>Log Production</h3>';
+  h += '<label>Date</label><input type="date" id="prd" value="' + today() + '">';
+  h += '<label>Worker</label><select id="prl"><option value="">-- pick --</option>' + lopts + '</select>';
+  h += '<label>Product</label><select id="prp"><option value="">-- pick --</option>' + popts + '</select>';
+  h += '<label>Quantity (dozens)</label><input type="number" id="prq" value="0">';
+  h += '<button class="btn" onclick="addProd2()">+ Log</button></div>';
+  h += '<div class="wrap"><table><thead><tr><th>Date</th><th>Worker</th><th>Product</th><th>Qty</th><th>Wage</th><th>Ragzine</th><th>Mash</th><th>Daimod</th><th></th></tr></thead><tbody>';
+  var rows = rev(prod);
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var l = find(labor, r.labor_id);
+    var p = find(prods, r.product_id);
+    h += '<tr><td>' + r.date + '</td><td>' + (l.name || "?") + '</td><td>' + (p.name || "?") + ' ' + (p.color || "") + '</td>';
+    h += '<td class="m">' + r.quantity + '</td><td class="m g">' + money(r.wage_earned) + '</td>';
+    h += '<td class="m">' + num(r.ragzine_used) + '</td><td class="m">' + num(r.mash_used) + '</td><td class="m">' + num(r.daimod_used) + '</td>';
+    h += '<td><button class="del" onclick="delProd2('' + r.id + '')">X</button></td></tr>';
+  }
+  if (!prod.length) h += '<tr><td colspan="9" style="text-align:center;padding:20px;color:#666">None yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.addProd2 = function() {
+  doSave(function(cb) {
+    var lid = document.getElementById("prl").value;
+    var pid = document.getElementById("prp").value;
+    var qty = +document.getElementById("prq").value;
+    if (!lid || !pid || !qty) return cb("Fill all fields");
+    var p = find(D.products || [], +pid);
+    var l = find(D.labor || [], +lid);
+    var cats = D.categories || [];
+    var cat = {};
+    for (var i = 0; i < cats.length; i++) if (cats[i].name === p.category) { cat = cats[i]; break; }
+    var isAdult = p.category === "Adult";
+    var wage = qty * (isAdult ? +(l.adult_wage_per_pc || 0) : +(l.kids_wage_per_pc || 0));
+    apiPost("production", {date:document.getElementById("prd").value, labor_id:+lid, product_id:+pid, quantity:qty, wage_earned:wage, ragzine_used:qty*+(cat.ragzine_per_pc||0), mash_used:qty*+(cat.mash_per_pc||0), daimod_used:qty*+(cat.daimod_per_pc||0), naki_feeta_used:qty*+(cat.naki_feeta_per_pc||0), pipe_used:qty*+(cat.pipe_per_pc||0)}, cb);
+  });
+};
+window.delProd2 = function(id) { doSave(function(cb) { apiDel("production", id, cb); }); };
+
+// ── ADVANCES ──
+function renderAdv() {
+  var labor = D.labor || [];
+  var adv = D.advances || [];
+  var lopts = ""; for (var i = 0; i < labor.length; i++) lopts += '<option value="' + labor[i].id + '">' + labor[i].name + '</option>';
+  var h = '<div class="card"><h3>Add Advance</h3>';
+  h += '<label>Date</label><input type="date" id="avd" value="' + today() + '">';
+  h += '<label>Worker</label><select id="avl"><option value="">-- pick --</option>' + lopts + '</select>';
+  h += '<label>Amount (Rs.)</label><input type="number" id="ava" value="0">';
+  h += '<label>Note</label><input id="avn">';
+  h += '<button class="btn" onclick="addAdv()">+ Add</button></div>';
+  h += '<div class="wrap"><table><thead><tr><th>Date</th><th>Worker</th><th>Amount</th><th>Note</th><th></th></tr></thead><tbody>';
+  var rows = rev(adv);
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var l = find(labor, r.labor_id);
+    h += '<tr><td>' + r.date + '</td><td>' + (l.name || "?") + '</td><td class="m">' + money(r.amount) + '</td><td>' + (r.note || "") + '</td><td><button class="del" onclick="delAdv('' + r.id + '')">X</button></td></tr>';
+  }
+  if (!adv.length) h += '<tr><td colspan="5" style="text-align:center;padding:20px;color:#666">None yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.addAdv = function() {
+  doSave(function(cb) {
+    var l = document.getElementById("avl").value;
+    if (!l) return cb("Pick worker");
+    apiPost("advances", {date:document.getElementById("avd").value, labor_id:+l, amount:+document.getElementById("ava").value, note:document.getElementById("avn").value}, cb);
+  });
+};
+window.delAdv = function(id) { doSave(function(cb) { apiDel("advances", id, cb); }); };
+
+// ── LABOR LEDGER ──
+var selW = null;
+function renderLedger() {
+  var labor = D.labor || [];
+  var h = '<div class="card"><h3>Labor Ledger</h3>';
+  for (var i = 0; i < labor.length; i++) {
+    var cls = selW === labor[i].id ? "btn" : "";
+    h += '<button style="margin:3px;padding:5px 12px;border-radius:15px;border:1px solid #ddd;cursor:pointer;font-size:12px;background:' + (selW === labor[i].id ? "#b45309" : "#fff") + ';color:' + (selW === labor[i].id ? "#fff" : "#333") + '" onclick="pickW(' + labor[i].id + ')">' + labor[i].name + '</button>';
+  }
+  if (!labor.length) h += '<p style="color:#666;font-size:12px">No workers yet.</p>';
+  h += '</div>';
+  if (!selW) { h += '<p style="color:#666;text-align:center">Select a worker above.</p>'; return h; }
+
+  var worker = find(labor, selW);
+  var prod = D.production || [];
+  var adv = D.advances || [];
+  var mi = D.material_issued || [];
+  var mats = D.raw_materials || [];
+  var prods = D.products || [];
+
+  var wProd = filter(prod, "labor_id", selW);
+  var wAdv = filter(adv, "labor_id", selW);
+  var wMI = filter(mi, "labor_id", selW);
+
+  var totalWage = +(worker.opening_balance_payable || 0) + sum(wProd, "wage_earned");
+  var totalAdv = sum(wAdv, "amount");
+  var net = totalWage - totalAdv;
+
+  h += '<div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">WAGE EARNED</div><div class="sval g">' + money(totalWage) + '</div></div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">ADVANCES</div><div class="sval r">' + money(totalAdv) + '</div></div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">NET PAYABLE</div><div class="sval ' + (net > 0 ? "g" : "r") + '">' + money(net) + '</div></div>';
+  h += '</div>';
+
+  h += '<div class="card"><h3>Material in Hand</h3>';
+  h += '<div class="wrap"><table><thead><tr><th>Material</th><th>Color</th><th>Issued</th><th>Consumed</th><th>Balance</th></tr></thead><tbody>';
+  var hasRows = false;
+  for (var i = 0; i < mats.length; i++) {
+    var rm = mats[i];
+    var issued = sum(filter(wMI, "material_id", rm.id), "quantity");
+    var consumed = 0;
+    for (var j = 0; j < wProd.length; j++) {
+      var pr = wProd[j];
+      var pp = find(prods, pr.product_id);
+      if (rm.material_name === "Ragzine" && pp.color === rm.color) consumed += +(pr.ragzine_used || 0);
+      if (rm.material_name === "Mash" && pp.color === rm.color) consumed += +(pr.mash_used || 0);
+      if (rm.material_name === "Daimod") consumed += +(pr.daimod_used || 0);
+      if (rm.material_name === "Naki Feeta") consumed += +(pr.naki_feeta_used || 0);
+      if (rm.material_name === "Pipe") consumed += +(pr.pipe_used || 0);
+    }
+    var bal = issued - consumed;
+    if (issued > 0 || bal !== 0) {
+      hasRows = true;
+      h += '<tr><td>' + rm.material_name + '</td><td>' + rm.color + '</td><td class="m">' + num(issued) + '</td><td class="m">' + num(consumed) + '</td><td class="m ' + (bal < 0 ? "r" : "g") + '">' + num(bal) + '</td></tr>';
+    }
+  }
+  if (!hasRows) h += '<tr><td colspan="5" style="text-align:center;padding:20px;color:#666">No material issued yet.</td></tr>';
+  h += '</tbody></table></div></div>';
+
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  h += '<div class="card"><h3>Production</h3>';
+  var rp = rev(wProd);
+  for (var i = 0; i < rp.length; i++) {
+    var pp = find(prods, rp[i].product_id);
+    h += '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid #f5f5f5;display:flex;justify-content:space-between"><span>' + rp[i].date + ' ' + (pp.name || "") + '</span><span class="m">' + rp[i].quantity + 'dz/' + money(rp[i].wage_earned) + '</span></div>';
+  }
+  if (!wProd.length) h += '<p style="color:#666;font-size:12px">None.</p>';
+  h += '</div>';
+
+  h += '<div class="card"><h3>Advances</h3>';
+  var ra = rev(wAdv);
+  for (var i = 0; i < ra.length; i++) {
+    h += '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid #f5f5f5;display:flex;justify-content:space-between"><span>' + ra[i].date + '</span><span class="m r">' + money(ra[i].amount) + '</span></div>';
+  }
+  if (!wAdv.length) h += '<p style="color:#666;font-size:12px">None.</p>';
+  h += '</div></div>';
+  return h;
+}
+window.pickW = function(id) { selW = selW === id ? null : id; render(); };
+
+// ── PURCHASES ──
+function renderPurch() {
+  var supps = D.suppliers || [];
+  var mats = D.raw_materials || [];
+  var purch = D.purchases || [];
+  var sopts = ""; for (var i = 0; i < supps.length; i++) sopts += '<option value="' + supps[i].id + '">' + supps[i].name + '</option>';
+  var mopts = ""; for (var i = 0; i < mats.length; i++) mopts += '<option value="' + mats[i].id + '">' + mats[i].display_name + '</option>';
+  var h = '<div class="card"><h3>Add Purchase</h3>';
+  h += '<label>Date</label><input type="date" id="pud" value="' + today() + '">';
+  h += '<label>Supplier</label><select id="pus"><option value="">-- pick --</option>' + sopts + '</select>';
+  h += '<label>Material</label><select id="pum"><option value="">-- pick --</option>' + mopts + '</select>';
+  h += '<label>Quantity</label><input type="number" id="puq" value="0">';
+  h += '<label>Rate (Rs.)</label><input type="number" id="pur" value="0">';
+  h += '<button class="btn" onclick="addPurch()">+ Add</button></div>';
+  h += '<div class="wrap"><table><thead><tr><th>Date</th><th>Supplier</th><th>Material</th><th>Qty</th><th>Rate</th><th>Total</th><th></th></tr></thead><tbody>';
+  var rows = rev(purch);
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var s = find(supps, r.supplier_id);
+    var m = find(mats, r.material_id);
+    h += '<tr><td>' + r.date + '</td><td>' + (s.name || "?") + '</td><td>' + (m.display_name || "?") + '</td><td class="m">' + r.quantity + '</td><td class="m">' + money(r.rate) + '</td><td class="m">' + money(r.total_value) + '</td><td><button class="del" onclick="delPurch('' + r.id + '')">X</button></td></tr>';
+  }
+  if (!purch.length) h += '<tr><td colspan="7" style="text-align:center;padding:20px;color:#666">None yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.addPurch = function() {
+  doSave(function(cb) {
+    var s = document.getElementById("pus").value;
+    var m = document.getElementById("pum").value;
+    if (!s || !m) return cb("Pick supplier and material");
+    var q = +document.getElementById("puq").value;
+    var r = +document.getElementById("pur").value;
+    apiPost("purchases", {date:document.getElementById("pud").value, supplier_id:+s, material_id:+m, quantity:q, rate:r, total_value:q*r}, cb);
+  });
+};
+window.delPurch = function(id) { doSave(function(cb) { apiDel("purchases", id, cb); }); };
+
+// ── SUPPLIERS ──
+function renderSupp() {
+  var supps = D.suppliers || [];
+  var purch = D.purchases || [];
+  var spays = D.supplier_payments || [];
+  var h = '<div class="card"><h3>Add Supplier</h3>';
+  h += '<label>Name</label><input id="sn">';
+  h += '<label>Contact</label><input id="sc">';
+  h += '<label>Opening Balance (Rs.)</label><input type="number" id="sob" value="0">';
+  h += '<button class="btn" onclick="addSupp()">+ Add</button></div>';
+  h += '<div class="wrap"><table><thead><tr><th>Name</th><th>Contact</th><th>Opening</th><th>Purchased</th><th>Paid</th><th>Balance</th><th></th></tr></thead><tbody>';
+  for (var i = 0; i < supps.length; i++) {
+    var s = supps[i];
+    var bought = sum(filter(purch, "supplier_id", s.id), "total_value");
+    var paid = sum(filter(spays, "supplier_id", s.id), "amount");
+    var bal = +(s.opening_balance || 0) + bought - paid;
+    h += '<tr><td>' + s.name + '</td><td>' + (s.contact || "") + '</td><td class="m">' + money(s.opening_balance) + '</td><td class="m">' + money(bought) + '</td><td class="m g">' + money(paid) + '</td><td class="m ' + (bal > 0 ? "r" : "g") + '">' + money(bal) + '</td><td><button class="del" onclick="delSupp(' + s.id + ')">X</button></td></tr>';
+  }
+  if (!supps.length) h += '<tr><td colspan="7" style="text-align:center;padding:20px;color:#666">None yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.addSupp = function() {
+  doSave(function(cb) {
+    var n = document.getElementById("sn").value;
+    if (!n) return cb("Name required");
+    apiPost("suppliers", {name:n, contact:document.getElementById("sc").value, opening_balance:+document.getElementById("sob").value}, cb);
+  });
+};
+window.delSupp = function(id) { doSave(function(cb) { apiDel("suppliers", id, cb); }); };
+
+// ── CUSTOMERS ──
+function renderCust() {
+  var custs = D.customers || [];
+  var sales = D.sales || [];
+  var pays = D.payments || [];
+  var h = '<div class="card"><h3>Add Customer</h3>';
+  h += '<label>Name</label><input id="cn">';
+  h += '<label>Contact</label><input id="cc">';
+  h += '<label>Opening Balance (Rs.)</label><input type="number" id="cob" value="0">';
+  h += '<button class="btn" onclick="addCust()">+ Add</button></div>';
+  h += '<div class="wrap"><table><thead><tr><th>Name</th><th>Contact</th><th>Opening</th><th>Total Sold</th><th>Received</th><th>Balance</th><th></th></tr></thead><tbody>';
+  for (var i = 0; i < custs.length; i++) {
+    var c = custs[i];
+    var sold = sum(filter(sales, "customer_id", c.id), "net_total");
+    var paid = sum(filter(pays, "customer_id", c.id), "amount");
+    var bal = +(c.opening_balance || 0) + sold - paid;
+    h += '<tr><td>' + c.name + '</td><td>' + (c.contact || "") + '</td><td class="m">' + money(c.opening_balance) + '</td><td class="m">' + money(sold) + '</td><td class="m g">' + money(paid) + '</td><td class="m ' + (bal > 0 ? "r" : "g") + '">' + money(bal) + '</td><td><button class="del" onclick="delCust(' + c.id + ')">X</button></td></tr>';
+  }
+  if (!custs.length) h += '<tr><td colspan="7" style="text-align:center;padding:20px;color:#666">None yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.addCust = function() {
+  doSave(function(cb) {
+    var n = document.getElementById("cn").value;
+    if (!n) return cb("Name required");
+    apiPost("customers", {name:n, contact:document.getElementById("cc").value, opening_balance:+document.getElementById("cob").value}, cb);
+  });
+};
+window.delCust = function(id) { doSave(function(cb) { apiDel("customers", id, cb); }); };
+
+// ── SALES ──
+function renderSales() {
+  var custs = D.customers || [];
+  var prods = D.products || [];
+  var sales = D.sales || [];
+  var prod = D.production || [];
+  var copts = ""; for (var i = 0; i < custs.length; i++) copts += '<option value="' + custs[i].id + '">' + custs[i].name + '</option>';
+  var popts = "";
+  for (var i = 0; i < prods.length; i++) {
+    var made = sum(filter(prod, "product_id", prods[i].id), "quantity");
+    var sld = sum(filter(sales, "product_id", prods[i].id), "quantity");
+    var stk = +(prods[i].opening_stock || 0) + made - sld;
+    popts += '<option value="' + prods[i].id + '" data-p="' + (prods[i].selling_price || 0) + '">' + prods[i].name + ' - ' + prods[i].color + ' (' + stk + ' doz)</option>';
+  }
+  var h = '<div class="card"><h3>New Sale</h3>';
+  h += '<label>Date</label><input type="date" id="sad" value="' + today() + '">';
+  h += '<label>Customer</label><select id="sac"><option value="">-- pick --</option>' + copts + '</select>';
+  h += '<label>Product</label><select id="sap" onchange="setRate(this)"><option value="">-- pick --</option>' + popts + '</select>';
+  h += '<label>Quantity (dozens)</label><input type="number" id="saq" value="0">';
+  h += '<label>Rate (Rs.)</label><input type="number" id="sar" value="0">';
+  h += '<label>Discount (Rs.)</label><input type="number" id="sadc" value="0">';
+  h += '<button class="btn" onclick="addSale()">+ Save Sale</button></div>';
+  h += '<div class="wrap"><table><thead><tr><th>Date</th><th>Customer</th><th>Product</th><th>Qty</th><th>Rate</th><th>Discount</th><th>Net Total</th><th></th></tr></thead><tbody>';
+  var rows = rev(sales);
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var c = find(custs, r.customer_id);
+    var p = find(prods, r.product_id);
+    h += '<tr><td>' + r.date + '</td><td>' + (c.name || "?") + '</td><td>' + (p.name || "?") + ' ' + (p.color || "") + '</td><td class="m">' + r.quantity + '</td><td class="m">' + money(r.rate) + '</td><td class="m">' + money(r.discount) + '</td><td class="m">' + money(r.net_total) + '</td><td><button class="del" onclick="delSale('' + r.id + '')">X</button></td></tr>';
+  }
+  if (!sales.length) h += '<tr><td colspan="8" style="text-align:center;padding:20px;color:#666">None yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.setRate = function(sel) {
+  var opt = sel.options[sel.selectedIndex];
+  if (opt) document.getElementById("sar").value = opt.getAttribute("data-p") || 0;
+};
+window.addSale = function() {
+  doSave(function(cb) {
+    var c = document.getElementById("sac").value;
+    var p = document.getElementById("sap").value;
+    if (!c || !p) return cb("Pick customer and product");
+    var q = +document.getElementById("saq").value;
+    var r = +document.getElementById("sar").value;
+    var d = +document.getElementById("sadc").value;
+    apiPost("sales", {date:document.getElementById("sad").value, customer_id:+c, product_id:+p, quantity:q, rate:r, discount:d, net_total:q*r-d}, cb);
+  });
+};
+window.delSale = function(id) { doSave(function(cb) { apiDel("sales", id, cb); }); };
+
+// ── PAYMENTS ──
+function renderPay() {
+  var custs = D.customers || [];
+  var pays = D.payments || [];
+  var copts = ""; for (var i = 0; i < custs.length; i++) copts += '<option value="' + custs[i].id + '">' + custs[i].name + '</option>';
+  var h = '<div class="card"><h3>Payment from Customer</h3>';
+  h += '<label>Date</label><input type="date" id="payd" value="' + today() + '">';
+  h += '<label>Customer</label><select id="payc"><option value="">-- pick --</option>' + copts + '</select>';
+  h += '<label>Amount (Rs.)</label><input type="number" id="paya" value="0">';
+  h += '<label>Note</label><input id="payn">';
+  h += '<button class="btn" onclick="addPay()">+ Add Payment</button></div>';
+  h += '<div class="wrap"><table><thead><tr><th>Date</th><th>Customer</th><th>Amount</th><th>Note</th><th></th></tr></thead><tbody>';
+  var rows = rev(pays);
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var c = find(custs, r.customer_id);
+    h += '<tr><td>' + r.date + '</td><td>' + (c.name || "?") + '</td><td class="m g">' + money(r.amount) + '</td><td>' + (r.note || "") + '</td><td><button class="del" onclick="delPay('' + r.id + '')">X</button></td></tr>';
+  }
+  if (!pays.length) h += '<tr><td colspan="5" style="text-align:center;padding:20px;color:#666">None yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.addPay = function() {
+  doSave(function(cb) {
+    var c = document.getElementById("payc").value;
+    if (!c) return cb("Pick customer");
+    apiPost("payments", {date:document.getElementById("payd").value, customer_id:+c, amount:+document.getElementById("paya").value, note:document.getElementById("payn").value}, cb);
+  });
+};
+window.delPay = function(id) { doSave(function(cb) { apiDel("payments", id, cb); }); };
+
+// ── SUPPLIER PAYMENTS ──
+function renderSPay() {
+  var supps = D.suppliers || [];
+  var spays = D.supplier_payments || [];
+  var sopts = ""; for (var i = 0; i < supps.length; i++) sopts += '<option value="' + supps[i].id + '">' + supps[i].name + '</option>';
+  var h = '<div class="card"><h3>Payment to Supplier</h3>';
+  h += '<label>Date</label><input type="date" id="spd" value="' + today() + '">';
+  h += '<label>Supplier</label><select id="sps"><option value="">-- pick --</option>' + sopts + '</select>';
+  h += '<label>Amount (Rs.)</label><input type="number" id="spa" value="0">';
+  h += '<label>Note</label><input id="spn">';
+  h += '<button class="btn" onclick="addSPay()">+ Add Payment</button></div>';
+  h += '<div class="wrap"><table><thead><tr><th>Date</th><th>Supplier</th><th>Amount</th><th>Note</th><th></th></tr></thead><tbody>';
+  var rows = rev(spays);
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var s = find(supps, r.supplier_id);
+    h += '<tr><td>' + r.date + '</td><td>' + (s.name || "?") + '</td><td class="m r">' + money(r.amount) + '</td><td>' + (r.note || "") + '</td><td><button class="del" onclick="delSPay('' + r.id + '')">X</button></td></tr>';
+  }
+  if (!spays.length) h += '<tr><td colspan="5" style="text-align:center;padding:20px;color:#666">None yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.addSPay = function() {
+  doSave(function(cb) {
+    var s = document.getElementById("sps").value;
+    if (!s) return cb("Pick supplier");
+    apiPost("supplier_payments", {date:document.getElementById("spd").value, supplier_id:+s, amount:+document.getElementById("spa").value, note:document.getElementById("spn").value}, cb);
+  });
+};
+window.delSPay = function(id) { doSave(function(cb) { apiDel("supplier_payments", id, cb); }); };
+
+// ── EXPENSES ──
+function renderExp() {
+  var exps = D.expenses || [];
+  var cats = ["Rent","Electricity","Transport","Maintenance","Marketing","Misc"];
+  var copts = ""; for (var i = 0; i < cats.length; i++) copts += '<option>' + cats[i] + '</option>';
+  var h = '<div class="card"><h3>Add Expense</h3>';
+  h += '<label>Date</label><input type="date" id="exd" value="' + today() + '">';
+  h += '<label>Category</label><select id="exc">' + copts + '</select>';
+  h += '<label>Amount (Rs.)</label><input type="number" id="exa" value="0">';
+  h += '<label>Note</label><input id="exn">';
+  h += '<button class="btn" onclick="addExp()">+ Add</button></div>';
+  h += '<div class="wrap"><table><thead><tr><th>Date</th><th>Category</th><th>Amount</th><th>Note</th><th></th></tr></thead><tbody>';
+  var rows = rev(exps);
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    h += '<tr><td>' + r.date + '</td><td>' + r.category + '</td><td class="m">' + money(r.amount) + '</td><td>' + (r.note || "") + '</td><td><button class="del" onclick="delExp('' + r.id + '')">X</button></td></tr>';
+  }
+  if (!exps.length) h += '<tr><td colspan="5" style="text-align:center;padding:20px;color:#666">None yet.</td></tr>';
+  h += '</tbody></table></div>';
+  return h;
+}
+window.addExp = function() {
+  doSave(function(cb) {
+    apiPost("expenses", {date:document.getElementById("exd").value, category:document.getElementById("exc").value, amount:+document.getElementById("exa").value, note:document.getElementById("exn").value}, cb);
+  });
+};
+window.delExp = function(id) { doSave(function(cb) { apiDel("expenses", id, cb); }); };
+
+// ── REPORTS ──
+var repP = 29;
+function renderRep() {
+  var sales = D.sales || [];
+  var exps = D.expenses || [];
+  var prod = D.production || [];
+  var purch = D.purchases || [];
+  var raw = D.raw_materials || [];
+  var pays = D.payments || [];
+  var spays = D.supplier_payments || [];
+  var supps = D.suppliers || [];
+  var custs = D.customers || [];
+
+  var pS = []; for (var i = 0; i < sales.length; i++) if (inRange(sales[i].date, repP)) pS.push(sales[i]);
+  var pE = []; for (var i = 0; i < exps.length; i++) if (inRange(exps[i].date, repP)) pE.push(exps[i]);
+  var pP = []; for (var i = 0; i < prod.length; i++) if (inRange(prod[i].date, repP)) pP.push(prod[i]);
+
+  var revenue = sum(pS, "net_total");
+  var discounts = sum(pS, "discount");
+  var overheads = sum(pE, "amount") + discounts;
+  var wages = sum(pP, "wage_earned");
+  var rawVal = 0; for (var i = 0; i < raw.length; i++) rawVal += +(raw[i].opening_stock || 0) * +(raw[i].cost_per_unit || 0);
+
+  var custBal = 0;
+  for (var i = 0; i < custs.length; i++) {
+    var sold = sum(filter(sales, "customer_id", custs[i].id), "net_total");
+    var paid = sum(filter(pays, "customer_id", custs[i].id), "amount");
+    custBal += +(custs[i].opening_balance || 0) + sold - paid;
+  }
+  var suppBal = 0;
+  for (var i = 0; i < supps.length; i++) {
+    var bought = sum(filter(purch, "supplier_id", supps[i].id), "total_value");
+    var spaid = sum(filter(spays, "supplier_id", supps[i].id), "amount");
+    suppBal += +(supps[i].opening_balance || 0) + bought - spaid;
+  }
+  var nwc = rawVal + custBal - suppBal + +(D.settings.cash_in_hand || 0);
+  var gross = revenue - wages;
+  var net = gross - overheads;
+  var margin = revenue ? (net / revenue * 100).toFixed(1) : "--";
+  var roi = nwc ? (net / nwc * 100).toFixed(2) : "--";
+  var units = sum(pP, "quantity");
+
+  var periods = [{l:"Daily",d:0},{l:"Weekly",d:6},{l:"Fortnightly",d:14},{l:"Monthly",d:29},{l:"Annual",d:364}];
+  var pbtns = "";
+  for (var i = 0; i < periods.length; i++) {
+    pbtns += '<button onclick="setRepP(' + periods[i].d + ')" style="margin:2px;padding:4px 9px;border-radius:12px;border:1px solid #ddd;cursor:pointer;font-size:11px;background:' + (repP === periods[i].d ? "#b45309" : "#fff") + ';color:' + (repP === periods[i].d ? "#fff" : "#666") + '">' + periods[i].l + '</button>';
+  }
+
+  var h = '<div class="card"><h3>Reports</h3>' + pbtns;
+  h += '<div style="margin-top:12px">';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">NET PROFIT</div><div class="sval ' + (net > 0 ? "g" : "r") + '">' + money(net) + '</div><div style="font-size:10px;color:#666">Margin ' + margin + '%</div></div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">REVENUE</div><div class="sval">' + money(revenue) + '</div><div style="font-size:10px;color:#666">' + pS.length + ' sales</div></div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">WAGES</div><div class="sval">' + money(wages) + '</div><div style="font-size:10px;color:#666">' + units + ' doz produced</div></div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">OVERHEADS+DISC</div><div class="sval">' + money(overheads) + '</div></div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">NET WORKING CAPITAL</div><div class="sval ' + (nwc > 0 ? "g" : "r") + '">' + money(nwc) + '</div></div>';
+  h += '<div class="stat"><div style="font-size:10px;color:#666">ROI</div><div class="sval ' + (+roi > 0 ? "g" : "") + '">' + (roi === "--" ? "--" : roi + "%") + '</div></div>';
+  h += '</div>';
+
+  h += '<h3 style="margin-top:14px">Profit & Loss</h3>';
+  h += '<table><tbody>';
+  h += '<tr><td>Sales Revenue</td><td class="m" style="text-align:right">' + money(revenue) + '</td></tr>';
+  h += '<tr><td>Wage Cost</td><td class="m" style="text-align:right">- ' + money(wages) + '</td></tr>';
+  h += '<tr><td style="font-weight:bold">Gross Profit</td><td class="m ' + (gross > 0 ? "g" : "r") + '" style="text-align:right;font-weight:bold">' + money(gross) + '</td></tr>';
+  h += '<tr><td>Overheads & Discounts</td><td class="m" style="text-align:right">- ' + money(overheads) + '</td></tr>';
+  h += '<tr><td style="font-weight:bold">Net Profit</td><td class="m ' + (net > 0 ? "g" : "r") + '" style="text-align:right;font-weight:bold">' + money(net) + '</td></tr>';
+  h += '</tbody></table>';
+
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">';
+  h += '<div><h3>Customer Balances</h3>';
+  for (var i = 0; i < custs.length; i++) {
+    var s2 = sum(filter(sales, "customer_id", custs[i].id), "net_total");
+    var p2 = sum(filter(pays, "customer_id", custs[i].id), "amount");
+    var b = +(custs[i].opening_balance || 0) + s2 - p2;
+    h += '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid #f5f5f5"><span>' + custs[i].name + '</span><span class="m ' + (b > 0 ? "r" : "g") + '">' + money(b) + '</span></div>';
+  }
+  if (!custs.length) h += '<p style="color:#666;font-size:12px">No customers.</p>';
+  h += '</div>';
+
+  h += '<div><h3>Supplier Balances</h3>';
+  for (var i = 0; i < supps.length; i++) {
+    var b2 = sum(filter(purch, "supplier_id", supps[i].id), "total_value");
+    var p3 = sum(filter(spays, "supplier_id", supps[i].id), "amount");
+    var b = +(supps[i].opening_balance || 0) + b2 - p3;
+    h += '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid #f5f5f5"><span>' + supps[i].name + '</span><span class="m ' + (b > 0 ? "r" : "g") + '">' + money(b) + '</span></div>';
+  }
+  if (!supps.length) h += '<p style="color:#666;font-size:12px">No suppliers.</p>';
+  h += '</div></div></div>';
+  return h;
+}
+window.setRepP = function(d) { repP = d; render(); };
+
+// ── SETTINGS ──
+function renderSett() {
+  var cats = D.categories || [];
+  var h = '<div class="card"><h3>Business</h3>';
+  h += '<label>Business Name</label><input id="stbn" value="' + (D.settings.business_name || "") + '">';
+  h += '<label>Cash in Hand (Rs.)</label><input type="number" id="stch" value="' + (D.settings.cash_in_hand || 0) + '">';
+  h += '<button class="btn" onclick="saveSett()">Save</button></div>';
+  h += '<div class="card"><h3>Categories - Material Averages and Wage Rate</h3>';
+  h += '<p style="font-size:11px;color:#666;margin-bottom:10px">Edit and click away to save. Per-piece averages for all products in that category.</p>';
+  h += '<div class="wrap"><table><thead><tr><th>Category</th><th>Ragzine</th><th>Mash</th><th>Daimod</th><th>Naki Feeta</th><th>Pipe</th><th>Wage</th></tr></thead><tbody>';
+  var fields = ["ragzine_per_pc","mash_per_pc","daimod_per_pc","naki_feeta_per_pc","pipe_per_pc","wage_rate"];
+  for (var i = 0; i < cats.length; i++) {
+    var c = cats[i];
+    h += '<tr><td style="font-weight:bold">' + c.name + '</td>';
+    for (var j = 0; j < fields.length; j++) {
+      h += '<td><input type="number" value="' + (c[fields[j]] || 0) + '" style="width:65px" onblur="updCat(' + c.id + ','' + fields[j] + '',this.value)"></td>';
+    }
+    h += '</tr>';
+  }
+  h += '</tbody></table></div></div>';
+  return h;
+}
+window.saveSett = function() {
+  doSave(function(cb) {
+    var biz = document.getElementById("stbn").value;
+    var cash = +document.getElementById("stch").value;
+    apiPatch("settings", 1, {business_name:biz, cash_in_hand:cash}, cb);
+  });
+};
+window.updCat = function(id, f, v) {
+  doSave(function(cb) { var d = {}; d[f] = +v; apiPatch("categories", id, d, cb); });
+};
+
+// ── START ──
+initNav();
+loadAll(function() {
+  render();
+  setInterval(function() { loadAll(render); }, 30000);
+});
+</script>
+</body>
+</html>
